@@ -44,6 +44,9 @@ func Available() (ok bool) {
 }
 
 func newBackend(ctx context.Context, cfg Config) (backend, error) {
+	if cfg.backendMode() == BackendDaemon {
+		return nil, ErrDaemonBackend
+	}
 	return backendFactory(ctx, cfg)
 }
 

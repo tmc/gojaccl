@@ -117,6 +117,50 @@ func TestConfigFromEnv(t *testing.T) {
 			t.Fatal("PreferRing = true, want false")
 		}
 	})
+	t.Run("BackendAndDaemonSocket", func(t *testing.T) {
+		path := writeDevices(t, fakeConfig(0, 2).Devices)
+		t.Setenv("JACCL_RANK", "0")
+		t.Setenv("JACCL_COORDINATOR", "host:1")
+		t.Setenv("JACCL_IBV_DEVICES", path)
+		t.Setenv("JACCL_BACKEND", BackendDaemon)
+		t.Setenv("JACCL_DAEMON_SOCKET", "/tmp/custom-jaccld.sock")
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Backend != BackendDaemon || cfg.DaemonSocket != "/tmp/custom-jaccld.sock" {
+			t.Fatalf("backend/socket = %q/%q", cfg.Backend, cfg.DaemonSocket)
+		}
+	})
+	t.Run("DaemonSocketDefault", func(t *testing.T) {
+		path := writeDevices(t, fakeConfig(0, 2).Devices)
+		t.Setenv("JACCL_RANK", "0")
+		t.Setenv("JACCL_COORDINATOR", "host:1")
+		t.Setenv("JACCL_IBV_DEVICES", path)
+		t.Setenv("JACCL_BACKEND", BackendDaemon)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.DaemonSocket != "/tmp/jaccld.sock" {
+			t.Fatalf("DaemonSocket = %q, want default", cfg.DaemonSocket)
+		}
+	})
+	t.Run("NoMLXBackendFallback", func(t *testing.T) {
+		path := writeDevices(t, fakeConfig(0, 2).Devices)
+		t.Setenv("MLX_RANK", "0")
+		t.Setenv("MLX_JACCL_COORDINATOR", "mlx:1234")
+		t.Setenv("MLX_IBV_DEVICES", path)
+		t.Setenv("MLX_BACKEND", BackendDaemon)
+		t.Setenv("MLX_DAEMON_SOCKET", "/tmp/mlx.sock")
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Backend != "" || cfg.DaemonSocket != "" {
+			t.Fatalf("MLX backend fallback set backend/socket = %q/%q", cfg.Backend, cfg.DaemonSocket)
+		}
+	})
 }
 
 func TestConfigValidate(t *testing.T) {
@@ -185,6 +229,22 @@ func TestConfigValidate(t *testing.T) {
 		cfg.Devices[1][0] = []string{}
 		if err := cfg.validate(); err == nil {
 			t.Fatal("validate no topology = nil")
+		}
+	})
+	t.Run("InvalidBackend", func(t *testing.T) {
+		cfg := fakeConfig(0, 2)
+		cfg.Backend = "magic"
+		if err := cfg.validate(); err == nil {
+			t.Fatal("validate invalid backend = nil")
+		}
+	})
+	t.Run("BackendModes", func(t *testing.T) {
+		for _, backend := range []string{"", BackendAuto, BackendDirect, BackendDaemon, " DAEMON "} {
+			cfg := fakeConfig(0, 2)
+			cfg.Backend = backend
+			if err := cfg.validate(); err != nil {
+				t.Fatalf("validate backend %q: %v", backend, err)
+			}
 		}
 	})
 }

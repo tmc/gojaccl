@@ -7,15 +7,35 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tmc/gojaccl/internal/ipc"
 	"github.com/tmc/gojaccl/internal/topology"
+)
+
+const (
+	// BackendAuto selects the working backend for the current implementation.
+	BackendAuto = "auto"
+
+	// BackendDirect selects the in-process RDMA backend.
+	BackendDirect = "direct"
+
+	// BackendDaemon selects the jaccld IPC backend.
+	BackendDaemon = "daemon"
 )
 
 // Config describes the local rank and RDMA connectivity for a group.
 type Config struct {
-	Rank        int
+	// Rank is this process's zero-based rank.
+	Rank int
+	// Coordinator is the rank-zero TCP side-channel address, host:port.
 	Coordinator string
-	Devices     [][][]string
-	PreferRing  bool
+	// Devices is indexed as [src][dst][wire] and names RDMA device paths.
+	Devices [][][]string
+	// PreferRing asks NewGroup to choose ring when the matrix is valid for it.
+	PreferRing bool
+	// Backend selects "auto", "direct", or "daemon". Empty means "auto".
+	Backend string
+	// DaemonSocket is the Unix-domain socket path for BackendDaemon.
+	DaemonSocket string
 }
 
 // ConfigFromEnv reads the JACCL configuration environment, using MLX fallbacks.
@@ -55,6 +75,15 @@ func ConfigFromEnv() (Config, error) {
 		}
 		cfg.PreferRing = prefer
 	}
+	if backend, ok := os.LookupEnv("JACCL_BACKEND"); ok {
+		cfg.Backend = backend
+	}
+	if socket, ok := os.LookupEnv("JACCL_DAEMON_SOCKET"); ok {
+		cfg.DaemonSocket = socket
+	}
+	if cfg.DaemonSocket == "" && cfg.backendMode() == BackendDaemon {
+		cfg.DaemonSocket = ipc.DefaultSocket
+	}
 
 	if err := cfg.validate(); err != nil {
 		return Config{}, err
@@ -78,7 +107,32 @@ func (c Config) validate() error {
 	if _, err := topology.Choose(c.Devices, c.PreferRing); err != nil {
 		return err
 	}
+	switch c.backendMode() {
+	case BackendAuto, BackendDirect, BackendDaemon:
+	default:
+		return fmt.Errorf("backend %q is invalid", c.Backend)
+	}
 	return nil
+}
+
+func (c Config) backendMode() string {
+	switch strings.ToLower(strings.TrimSpace(c.Backend)) {
+	case "", BackendAuto:
+		return BackendAuto
+	case BackendDirect:
+		return BackendDirect
+	case BackendDaemon:
+		return BackendDaemon
+	default:
+		return strings.ToLower(strings.TrimSpace(c.Backend))
+	}
+}
+
+func (c Config) daemonSocket() string {
+	if socket := strings.TrimSpace(c.DaemonSocket); socket != "" {
+		return socket
+	}
+	return ipc.DefaultSocket
 }
 
 func readDeviceMatrix(path string) ([][][]string, error) {

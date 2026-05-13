@@ -13,22 +13,26 @@ Package name: `jaccl`.
 Implementation files:
 
 - `doc.go`: package documentation.
-- `config.go`: `Config`, `ConfigFromEnv`, device-matrix file loading, and
-  configuration validation.
+- `config.go`: `Config`, backend-mode constants, `ConfigFromEnv`,
+  device-matrix file loading, daemon socket configuration, and configuration
+  validation.
 - `group.go`: `Group`, `NewGroup`, `NewGroupFromEnv`, `Rank`, `Size`, `Close`,
   lifecycle state, and operation serialization.
 - `collective.go`: `Element`, `AllSum`, `AllMax`, `AllMin`, `AllGather`, slice
   length checks, and alias checks.
 - `p2p.go`: `Barrier`, `Send`, and `Recv`.
-- `backend.go`: unexported backend interface, backend selection, and the
-  bridge from `Group` methods to internal transport packages.
-- `errors.go`: error wrapping helpers and package-local sentinel errors.
+- `backend.go`: unexported backend interface, backend selection, daemon
+  fail-fast behavior until the IPC data path is wired, and the bridge from
+  `Group` methods to internal transport packages.
+- `errors.go`: error wrapping helpers and package sentinel errors, including
+  the explicit daemon-backend-not-wired error.
 
 Test and benchmark files:
 
 - `backend_test.go`: backend selection, `Available`, and backend abstraction
   tests.
-- `config_test.go`: environment parsing and configuration validation tests.
+- `config_test.go`: environment parsing, backend selection, daemon socket, and
+  configuration validation tests.
 - `group_test.go`: group construction, lifecycle, close, and operation
   serialization tests.
 - `collective_test.go`: collective length, cancellation, zero-length,

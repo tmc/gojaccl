@@ -4,6 +4,11 @@
 The public Go JACCL API should become a client of this daemon rather than
 allocating verbs resources in each process.
 
+Use of the daemon backend is explicit. `Config.Backend` accepts `auto`,
+`direct`, and `daemon`; empty means `auto`. Until the daemon data path is wired
+into public collectives, `auto` uses the working direct backend and `daemon`
+fails fast rather than silently falling back to direct RDMA ownership.
+
 ## Constraints
 
 Apple's Thunderbolt RDMA provider has small and fragile process-visible

@@ -6,12 +6,17 @@
 //
 // Configuration is explicit. Config records the local rank, the rank-zero
 // coordinator address, the rank-by-rank RDMA device matrix, and whether a valid
-// ring topology should be preferred.
+// ring topology should be preferred. It also records the backend mode. Empty
+// and "auto" use the working direct backend today; "daemon" is reserved for the
+// jaccld IPC backend and fails until the data path is wired.
 //
 // NewGroup validates the configuration, creates the side channel, initializes
 // RDMA resources, and returns only after the group is ready. NewGroupFromEnv
-// reads the JACCL_RANK, JACCL_IBV_DEVICES, JACCL_COORDINATOR, and JACCL_RING
-// environment variables, with MLX_* fallbacks matching MLX JACCL.
+// reads the JACCL_RANK, JACCL_IBV_DEVICES, JACCL_COORDINATOR, JACCL_RING,
+// JACCL_BACKEND, and JACCL_DAEMON_SOCKET environment variables. The rank,
+// coordinator, device, and ring variables have MLX_* fallbacks matching MLX
+// JACCL; the backend and daemon socket variables are Go-specific and do not
+// use MLX fallbacks.
 //
 // Errors include operation and rank context when available.
 //

@@ -23,6 +23,9 @@ $ go test -v ./gojaccl/...
 === RUN   TestConfigFromEnv/InvalidDevicesJSON
 === RUN   TestConfigFromEnv/PreferRingTrue
 === RUN   TestConfigFromEnv/PreferRingFalse
+=== RUN   TestConfigFromEnv/BackendAndDaemonSocket
+=== RUN   TestConfigFromEnv/DaemonSocketDefault
+=== RUN   TestConfigFromEnv/NoMLXBackendFallback
 --- PASS: TestConfigFromEnv (0.00s)
     --- PASS: TestConfigFromEnv/JACCLValues (0.00s)
     --- PASS: TestConfigFromEnv/MLXFallbackValues (0.00s)
@@ -34,6 +37,9 @@ $ go test -v ./gojaccl/...
     --- PASS: TestConfigFromEnv/InvalidDevicesJSON (0.00s)
     --- PASS: TestConfigFromEnv/PreferRingTrue (0.00s)
     --- PASS: TestConfigFromEnv/PreferRingFalse (0.00s)
+    --- PASS: TestConfigFromEnv/BackendAndDaemonSocket (0.00s)
+    --- PASS: TestConfigFromEnv/DaemonSocketDefault (0.00s)
+    --- PASS: TestConfigFromEnv/NoMLXBackendFallback (0.00s)
 === RUN   TestConfigValidate
 === RUN   TestConfigValidate/TwoRankMesh
 === RUN   TestConfigValidate/TwoRankRing
@@ -45,6 +51,8 @@ $ go test -v ./gojaccl/...
 === RUN   TestConfigValidate/NonSquareDeviceMatrix
 === RUN   TestConfigValidate/RaggedDeviceMatrix
 === RUN   TestConfigValidate/NoUsableTopology
+=== RUN   TestConfigValidate/InvalidBackend
+=== RUN   TestConfigValidate/BackendModes
 --- PASS: TestConfigValidate (0.00s)
     --- PASS: TestConfigValidate/TwoRankMesh (0.00s)
     --- PASS: TestConfigValidate/TwoRankRing (0.00s)
@@ -56,6 +64,8 @@ $ go test -v ./gojaccl/...
     --- PASS: TestConfigValidate/NonSquareDeviceMatrix (0.00s)
     --- PASS: TestConfigValidate/RaggedDeviceMatrix (0.00s)
     --- PASS: TestConfigValidate/NoUsableTopology (0.00s)
+    --- PASS: TestConfigValidate/InvalidBackend (0.00s)
+    --- PASS: TestConfigValidate/BackendModes (0.00s)
 === RUN   TestAvailable
 === RUN   TestAvailable/NeverPanics
 === RUN   TestAvailable/FalseWhenBackendUnavailable
@@ -69,6 +79,7 @@ $ go test -v ./gojaccl/...
 === RUN   TestNewGroup/FakeBackendInitializes
 === RUN   TestNewGroup/ReadyBeforeReturn
 === RUN   TestNewGroup/ErrorIncludesOperationAndRank
+=== RUN   TestNewGroup/DaemonBackendFailsFast
 --- PASS: TestNewGroup (0.01s)
     --- PASS: TestNewGroup/InvalidConfigBeforeBackend (0.00s)
     --- PASS: TestNewGroup/ContextCanceledBeforeStart (0.00s)
@@ -76,6 +87,7 @@ $ go test -v ./gojaccl/...
     --- PASS: TestNewGroup/FakeBackendInitializes (0.00s)
     --- PASS: TestNewGroup/ReadyBeforeReturn (0.00s)
     --- PASS: TestNewGroup/ErrorIncludesOperationAndRank (0.00s)
+    --- PASS: TestNewGroup/DaemonBackendFailsFast (0.00s)
 === RUN   TestNewGroupFromEnv
 === RUN   TestNewGroupFromEnv/UsesConfigFromEnv
 === RUN   TestNewGroupFromEnv/PropagatesContext

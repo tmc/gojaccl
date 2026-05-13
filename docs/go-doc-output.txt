@@ -16,12 +16,17 @@ Close.
 
 Configuration is explicit. Config records the local rank, the rank-zero
 coordinator address, the rank-by-rank RDMA device matrix, and whether a valid
-ring topology should be preferred.
+ring topology should be preferred. It also records the backend mode. Empty and
+"auto" use the working direct backend today; "daemon" is reserved for the
+jaccld IPC backend and fails until the data path is wired.
 
 NewGroup validates the configuration, creates the side channel, initializes
 RDMA resources, and returns only after the group is ready. NewGroupFromEnv
-reads the JACCL_RANK, JACCL_IBV_DEVICES, JACCL_COORDINATOR, and JACCL_RING
-environment variables, with MLX_* fallbacks matching MLX JACCL.
+reads the JACCL_RANK, JACCL_IBV_DEVICES, JACCL_COORDINATOR, JACCL_RING,
+JACCL_BACKEND, and JACCL_DAEMON_SOCKET environment variables. The rank,
+coordinator, device, and ring variables have MLX_* fallbacks matching MLX
+JACCL; the backend and daemon socket variables are Go-specific and do not use
+MLX fallbacks.
 
 Errors include operation and rank context when available.
 
@@ -51,10 +56,12 @@ func AllGather[T Element](ctx context.Context, g *Group, dst, src []T) error
 func AllMax[T Element](ctx context.Context, g *Group, dst, src []T) error
 func AllMin[T Element](ctx context.Context, g *Group, dst, src []T) error
 func AllSum[T Element](ctx context.Context, g *Group, dst, src []T) error
-func Available() bool
+func Available() (ok bool)
 func ConfigFromEnv() (Config, error)
 func NewGroup(ctx context.Context, cfg Config) (*Group, error)
 func NewGroupFromEnv(ctx context.Context) (*Group, error)
+
+const BackendAuto = "auto" ...
 
 type Config struct {
 	// Rank is this process's zero-based rank.
@@ -67,6 +74,10 @@ type Config struct {
 	Devices     [][][]string
 	// PreferRing asks NewGroup to choose ring when the matrix is valid for it.
 	PreferRing  bool
+	// Backend selects "auto", "direct", or "daemon". Empty means "auto".
+	Backend     string
+	// DaemonSocket is the Unix-domain socket path for BackendDaemon.
+	DaemonSocket string
 }
 
 type Element interface {
