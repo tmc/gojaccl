@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"sync"
 	"syscall"
 
 	"github.com/tmc/gojaccl/internal/allocator"
@@ -26,6 +27,12 @@ type Transport interface {
 	Barrier(context.Context) error
 	Send(context.Context, int, int64, int64) error
 	Recv(context.Context, int, int64, int64) error
+}
+
+// CollectiveTransport performs daemon-owned asynchronous collective work.
+type CollectiveTransport interface {
+	AllReduce(context.Context, int, int, int64, int64, int64, int64) error
+	AllGather(context.Context, int, int64, int64, int64, int64) error
 }
 
 // NewServer returns a Server backed by slab.
@@ -95,9 +102,15 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 
 func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 	defer conn.Close()
+	workCtx, cancelWork := context.WithCancel(ctx)
 	leases := make(map[uint64]allocator.Lease)
 	sessions := make(map[resource.LeaseID]bool)
+	work := make(map[uint64]<-chan error)
+	var nextWork uint64
+	var wg sync.WaitGroup
 	defer func() {
+		cancelWork()
+		wg.Wait()
 		for id := range leases {
 			_ = s.slab.Free(id)
 		}
@@ -227,10 +240,69 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 				continue
 			}
 			_ = writeControl(conn, Response{OK: true, ResourceStats: s.resources.Stats()}, nil)
+		case opSubmitReduce:
+			ct, ok := s.transport.(CollectiveTransport)
+			if !ok {
+				_ = writeControl(conn, Response{Error: ErrNoTransport.Error()}, nil)
+				continue
+			}
+			if err := checkAsyncRange(req, leases); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			nextWork++
+			id := nextWork
+			work[id] = startWork(&wg, func() error {
+				return ct.AllReduce(workCtx, req.ReductionOp, req.DType, req.DstOffset, req.DstLength, req.SrcOffset, req.SrcLength)
+			})
+			_ = writeControl(conn, Response{OK: true, WorkID: id}, nil)
+		case opSubmitGather:
+			ct, ok := s.transport.(CollectiveTransport)
+			if !ok {
+				_ = writeControl(conn, Response{Error: ErrNoTransport.Error()}, nil)
+				continue
+			}
+			if err := checkAsyncRange(req, leases); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			nextWork++
+			id := nextWork
+			work[id] = startWork(&wg, func() error {
+				return ct.AllGather(workCtx, req.ElementSize, req.DstOffset, req.DstLength, req.SrcOffset, req.SrcLength)
+			})
+			_ = writeControl(conn, Response{OK: true, WorkID: id}, nil)
+		case opWaitWork:
+			ch, ok := work[req.WorkID]
+			if !ok {
+				_ = writeControl(conn, Response{Error: fmt.Sprintf("unknown work id %d", req.WorkID)}, nil)
+				continue
+			}
+			select {
+			case err := <-ch:
+				delete(work, req.WorkID)
+				if err != nil {
+					_ = writeControl(conn, Response{OK: true, Ready: true, WorkError: err.Error()}, nil)
+					continue
+				}
+				_ = writeControl(conn, Response{OK: true, Ready: true}, nil)
+			default:
+				_ = writeControl(conn, Response{OK: true}, nil)
+			}
 		default:
 			_ = writeControl(conn, Response{Error: fmt.Sprintf("unknown op %q", req.Op)}, nil)
 		}
 	}
+}
+
+func startWork(wg *sync.WaitGroup, fn func() error) <-chan error {
+	ch := make(chan error, 1)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		ch <- fn()
+	}()
+	return ch
 }
 
 type disabledTransport struct{}
@@ -262,6 +334,28 @@ func checkRange(req Request, leases map[uint64]allocator.Lease) error {
 	leaseEnd := lease.Offset + lease.Length
 	if end < req.Offset || req.Offset < lease.Offset || end > leaseEnd {
 		return fmt.Errorf("range [%d,%d) outside lease %d range [%d,%d)", req.Offset, end, req.LeaseID, lease.Offset, leaseEnd)
+	}
+	return nil
+}
+
+func checkAsyncRange(req Request, leases map[uint64]allocator.Lease) error {
+	if req.DstOffset < 0 || req.DstLength < 0 || req.SrcOffset < 0 || req.SrcLength < 0 {
+		return fmt.Errorf("async range is invalid")
+	}
+	if req.DstOffset+req.DstLength < req.DstOffset || req.SrcOffset+req.SrcLength < req.SrcOffset {
+		return fmt.Errorf("async range overflows")
+	}
+	if req.SrcLength == 0 {
+		return fmt.Errorf("async source length is zero")
+	}
+	if req.DstLength < req.SrcLength {
+		return fmt.Errorf("async destination length %d, want at least %d", req.DstLength, req.SrcLength)
+	}
+	if err := checkRange(Request{LeaseID: req.SrcLeaseID, Peer: 0, Offset: req.SrcOffset, Length: req.SrcLength}, leases); err != nil {
+		return fmt.Errorf("async source: %w", err)
+	}
+	if err := checkRange(Request{LeaseID: req.DstLeaseID, Peer: 0, Offset: req.DstOffset, Length: req.DstLength}, leases); err != nil {
+		return fmt.Errorf("async destination: %w", err)
 	}
 	return nil
 }

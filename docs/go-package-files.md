@@ -23,17 +23,16 @@ Implementation files:
 - `p2p.go`: `Barrier`, `Send`, and `Recv`.
 - `backend.go`: unexported backend interface, backend selection, and the bridge
   from `Group` methods to internal transport packages.
-- `daemon_backend.go`: jaccld IPC client backend for barrier and point-to-point
-  operations, with explicit unsupported errors for daemon-backed collectives.
-- `errors.go`: error wrapping helpers and package sentinel errors, including
-  the explicit daemon-collective-not-wired error.
+- `daemon_backend.go`: jaccld IPC client backend for barrier, point-to-point
+  operations, and daemon-supported collectives.
+- `errors.go`: error wrapping helpers and package sentinel errors.
 
 Test and benchmark files:
 
 - `backend_test.go`: backend selection, `Available`, and backend abstraction
   tests.
 - `daemon_backend_test.go`: hardware-free daemon backend tests using an
-  in-process IPC server and fake transport.
+  in-process IPC server and fake transport, including async collective work.
 - `config_test.go`: environment parsing, backend selection, daemon socket, and
   configuration validation tests.
 - `group_test.go`: group construction, lifecycle, close, and operation

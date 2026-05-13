@@ -106,6 +106,91 @@ func (c *Client) Recv(ctx context.Context, peer int, lease allocator.Lease) erro
 	return err
 }
 
+// SubmitReduce starts an asynchronous daemon reduction over slab leases.
+func (c *Client) SubmitReduce(ctx context.Context, op int, dt int, dst, src allocator.Lease) (uint64, error) {
+	resp, fds, err := c.do(ctx, Request{
+		Op:          opSubmitReduce,
+		ReductionOp: op,
+		DType:       dt,
+		DstLeaseID:  dst.ID,
+		DstOffset:   dst.Offset,
+		DstLength:   dst.Length,
+		SrcLeaseID:  src.ID,
+		SrcOffset:   src.Offset,
+		SrcLength:   src.Length,
+	})
+	closeFDs(fds)
+	if err != nil {
+		return 0, err
+	}
+	return resp.WorkID, nil
+}
+
+// SubmitGather starts an asynchronous daemon all-gather over slab leases.
+func (c *Client) SubmitGather(ctx context.Context, elemSize int, dst, src allocator.Lease) (uint64, error) {
+	resp, fds, err := c.do(ctx, Request{
+		Op:          opSubmitGather,
+		ElementSize: elemSize,
+		DstLeaseID:  dst.ID,
+		DstOffset:   dst.Offset,
+		DstLength:   dst.Length,
+		SrcLeaseID:  src.ID,
+		SrcOffset:   src.Offset,
+		SrcLength:   src.Length,
+	})
+	closeFDs(fds)
+	if err != nil {
+		return 0, err
+	}
+	return resp.WorkID, nil
+}
+
+// WaitWork waits for asynchronous daemon work to finish.
+func (c *Client) WaitWork(ctx context.Context, id uint64) error {
+	backoff := time.Millisecond
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		resp, fds, err := c.do(context.Background(), Request{Op: opWaitWork, WorkID: id})
+		closeFDs(fds)
+		if err != nil {
+			return err
+		}
+		if resp.Ready {
+			if resp.WorkError != "" {
+				return fmt.Errorf("%s", resp.WorkError)
+			}
+			return nil
+		}
+		if timer == nil {
+			timer = time.NewTimer(backoff)
+		} else {
+			timer.Reset(backoff)
+		}
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if backoff < 50*time.Millisecond {
+			backoff *= 2
+		}
+	}
+}
+
 // Stats returns daemon slab statistics.
 func (c *Client) Stats(ctx context.Context) (allocator.Stats, error) {
 	resp, fds, err := c.do(ctx, Request{Op: opStats})

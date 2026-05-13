@@ -2,7 +2,6 @@ package jaccl
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -19,8 +18,9 @@ func TestDaemonBackendP2P(t *testing.T) {
 	tr := &daemonTransport{}
 	slab, socket, cleanup := startDaemonBackendServer(t, tr)
 	defer cleanup()
-	tr.slab = slab
-	tr.recvData = []byte("from-peer")
+	tr.setSlab(slab)
+	recvWant := []byte("from-peer")
+	tr.setRecvData(recvWant)
 
 	g, err := NewGroup(context.Background(), daemonConfig(socket))
 	if err != nil {
@@ -34,12 +34,12 @@ func TestDaemonBackendP2P(t *testing.T) {
 	if err := g.Send(context.Background(), 1, []byte("to-peer")); err != nil {
 		t.Fatal(err)
 	}
-	dst := make([]byte, len(tr.recvData))
+	dst := make([]byte, len(recvWant))
 	if err := g.Recv(context.Background(), 1, dst); err != nil {
 		t.Fatal(err)
 	}
-	if string(dst) != string(tr.recvData) {
-		t.Fatalf("recv = %q, want %q", dst, tr.recvData)
+	if string(dst) != string(recvWant) {
+		t.Fatalf("recv = %q, want %q", dst, recvWant)
 	}
 	calls := tr.calls()
 	if len(calls) != 3 || calls[0].op != "barrier" || calls[1].op != "send" || calls[2].op != "recv" {
@@ -54,9 +54,15 @@ func TestDaemonBackendP2P(t *testing.T) {
 	}
 }
 
-func TestDaemonBackendCollectivesUnsupported(t *testing.T) {
-	tr := &daemonTransport{}
-	_, socket, cleanup := startDaemonBackendServer(t, tr)
+func TestDaemonBackendCollectives(t *testing.T) {
+	reduceWant := []int64{3}
+	gatherWant := []int64{1, 2}
+	tr := &daemonTransport{
+		reduceData: append([]byte(nil), sliceBytes(reduceWant)...),
+		gatherData: append([]byte(nil), sliceBytes(gatherWant)...),
+	}
+	slab, socket, cleanup := startDaemonBackendServer(t, tr)
+	tr.setSlab(slab)
 	defer cleanup()
 
 	g, err := NewGroup(context.Background(), daemonConfig(socket))
@@ -67,12 +73,18 @@ func TestDaemonBackendCollectivesUnsupported(t *testing.T) {
 
 	dst := []int64{0}
 	src := []int64{1}
-	if err := AllSum(context.Background(), g, dst, src); !errors.Is(err, ErrDaemonCollective) {
-		t.Fatalf("AllSum daemon backend = %v, want ErrDaemonCollective", err)
+	if err := AllSum(context.Background(), g, dst, src); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(dst) != fmt.Sprint(reduceWant) {
+		t.Fatalf("AllSum dst = %v, want %v", dst, reduceWant)
 	}
 	gatherDst := make([]int64, 2)
-	if err := AllGather(context.Background(), g, gatherDst, src); !errors.Is(err, ErrDaemonCollective) {
-		t.Fatalf("AllGather daemon backend = %v, want ErrDaemonCollective", err)
+	if err := AllGather(context.Background(), g, gatherDst, src); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(gatherDst) != fmt.Sprint(gatherWant) {
+		t.Fatalf("AllGather dst = %v, want %v", gatherDst, gatherWant)
 	}
 }
 
@@ -143,10 +155,48 @@ type daemonTransportCall struct {
 }
 
 type daemonTransport struct {
-	mu       sync.Mutex
-	slab     *allocator.Slab
-	recvData []byte
-	log      []daemonTransportCall
+	mu         sync.Mutex
+	slab       *allocator.Slab
+	recvData   []byte
+	reduceData []byte
+	gatherData []byte
+	log        []daemonTransportCall
+}
+
+func (t *daemonTransport) setSlab(slab *allocator.Slab) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.slab = slab
+}
+
+func (t *daemonTransport) setRecvData(data []byte) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.recvData = append([]byte(nil), data...)
+}
+
+func (t *daemonTransport) slabBytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.slab.Bytes()
+}
+
+func (t *daemonTransport) recvBytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.recvData...)
+}
+
+func (t *daemonTransport) reduceBytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.reduceData...)
+}
+
+func (t *daemonTransport) gatherBytes() []byte {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return append([]byte(nil), t.gatherData...)
 }
 
 func (t *daemonTransport) Barrier(context.Context) error {
@@ -155,17 +205,38 @@ func (t *daemonTransport) Barrier(context.Context) error {
 }
 
 func (t *daemonTransport) Send(_ context.Context, peer int, offset, length int64) error {
-	data := append([]byte(nil), t.slab.Bytes()[offset:offset+length]...)
+	data := append([]byte(nil), t.slabBytes()[offset:offset+length]...)
 	t.record(daemonTransportCall{op: "send", peer: peer, offset: offset, length: length, data: data})
 	return nil
 }
 
 func (t *daemonTransport) Recv(_ context.Context, peer int, offset, length int64) error {
 	t.record(daemonTransportCall{op: "recv", peer: peer, offset: offset, length: length})
-	if int64(len(t.recvData)) != length {
-		return fmt.Errorf("recv data length %d, want %d", len(t.recvData), length)
+	data := t.recvBytes()
+	if int64(len(data)) != length {
+		return fmt.Errorf("recv data length %d, want %d", len(data), length)
 	}
-	copy(t.slab.Bytes()[offset:offset+length], t.recvData)
+	copy(t.slabBytes()[offset:offset+length], data)
+	return nil
+}
+
+func (t *daemonTransport) AllReduce(_ context.Context, op, dt int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	t.record(daemonTransportCall{op: "allReduce", offset: srcOffset, length: srcLength})
+	data := t.reduceBytes()
+	if int64(len(data)) != dstLength {
+		return fmt.Errorf("reduce data length %d, want %d", len(data), dstLength)
+	}
+	copy(t.slabBytes()[dstOffset:dstOffset+dstLength], data)
+	return nil
+}
+
+func (t *daemonTransport) AllGather(_ context.Context, elemSize int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	t.record(daemonTransportCall{op: "allGather", offset: srcOffset, length: srcLength})
+	data := t.gatherBytes()
+	if int64(len(data)) != dstLength {
+		return fmt.Errorf("gather data length %d, want %d", len(data), dstLength)
+	}
+	copy(t.slabBytes()[dstOffset:dstOffset+dstLength], data)
 	return nil
 }
 

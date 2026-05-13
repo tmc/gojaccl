@@ -69,12 +69,72 @@ func (b *daemonBackend) recv(ctx context.Context, src int, dst []byte) (err erro
 	return nil
 }
 
-func (b *daemonBackend) allReduce(context.Context, reductionOp, reduce.DType, []byte, []byte) error {
-	return ErrDaemonCollective
+func (b *daemonBackend) allReduce(ctx context.Context, op reductionOp, dt reduce.DType, dst, src []byte) (err error) {
+	if len(src) == 0 {
+		return nil
+	}
+	srcLease, err := b.client.Alloc(ctx, int64(len(src)))
+	if err != nil {
+		return err
+	}
+	defer b.free(&err, srcLease.ID)
+	dstLease, err := b.client.Alloc(ctx, int64(len(dst)))
+	if err != nil {
+		return err
+	}
+	defer b.free(&err, dstLease.ID)
+	srcBuf, err := b.bytes(srcLease)
+	if err != nil {
+		return err
+	}
+	copy(srcBuf, src)
+	work, err := b.client.SubmitReduce(ctx, int(op), int(dt), dstLease, srcLease)
+	if err != nil {
+		return err
+	}
+	if err := b.client.WaitWork(ctx, work); err != nil {
+		return err
+	}
+	dstBuf, err := b.bytes(dstLease)
+	if err != nil {
+		return err
+	}
+	copy(dst, dstBuf)
+	return nil
 }
 
-func (b *daemonBackend) allGather(context.Context, int, []byte, []byte) error {
-	return ErrDaemonCollective
+func (b *daemonBackend) allGather(ctx context.Context, elemSize int, dst, src []byte) (err error) {
+	if len(src) == 0 {
+		return nil
+	}
+	srcLease, err := b.client.Alloc(ctx, int64(len(src)))
+	if err != nil {
+		return err
+	}
+	defer b.free(&err, srcLease.ID)
+	dstLease, err := b.client.Alloc(ctx, int64(len(dst)))
+	if err != nil {
+		return err
+	}
+	defer b.free(&err, dstLease.ID)
+	srcBuf, err := b.bytes(srcLease)
+	if err != nil {
+		return err
+	}
+	copy(srcBuf, src)
+	work, err := b.client.SubmitGather(ctx, elemSize, dstLease, srcLease)
+	if err != nil {
+		return err
+	}
+	if err := b.client.WaitWork(ctx, work); err != nil {
+		return err
+	}
+	dstBuf, err := b.bytes(dstLease)
+	if err != nil {
+		return err
+	}
+	copy(dst, dstBuf)
+	return nil
 }
 
 func (b *daemonBackend) close() error {

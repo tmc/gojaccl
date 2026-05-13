@@ -246,8 +246,9 @@ operator opt-in before driving the macOS RTR transition.
 protection domain, registers one shared slab memory region, exchanges daemon
 queue-pair destinations over the TCP side channel, and serves local IPC clients
 over a Unix-domain socket. The daemon backend is optional and explicit. It
-supports barrier, send, and recv through slab leases; collectives remain on the
-direct backend until the IPC protocol has a deliberate asynchronous work model.
+supports barrier, send, recv, and daemon-supported collectives through slab
+leases. Collective IPC uses a deliberate asynchronous work model: clients submit
+work and then wait on a work ID.
 
 The daemon uses RDMA-write heartbeats for the Apple idle-QP failure. Each daemon
 reserves one byte in the registered slab, publishes that address and rkey with

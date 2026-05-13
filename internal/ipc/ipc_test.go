@@ -256,6 +256,142 @@ func TestClientSessionOpsNeedResourceStore(t *testing.T) {
 	}
 }
 
+func TestClientAsyncWorkDoesNotBlockConnection(t *testing.T) {
+	tr := newFakeTransport()
+	tr.block = make(chan struct{})
+	_, client, _, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+	defer client.Close()
+
+	src, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := client.SubmitReduce(context.Background(), 0, 0, dst, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := client.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Leases != 2 {
+		t.Fatalf("stats while work pending = %+v, want two leases", stats)
+	}
+	close(tr.block)
+	if err := client.WaitWork(context.Background(), work); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientWaitWorkContext(t *testing.T) {
+	tr := newFakeTransport()
+	tr.block = make(chan struct{})
+	_, client, _, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+	defer client.Close()
+	defer close(tr.block)
+
+	src, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	work, err := client.SubmitReduce(context.Background(), 0, 0, dst, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	if err := client.WaitWork(ctx, work); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitWork = %v, want deadline exceeded", err)
+	}
+}
+
+func TestServerKeepsLeasesUntilAsyncWorkStopsOnDisconnect(t *testing.T) {
+	tr := newFakeTransport()
+	tr.block = make(chan struct{})
+	tr.ignoreContext = true
+	tr.started = make(chan struct{})
+	_, client, socket, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+
+	src, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SubmitReduce(context.Background(), 0, 0, dst, src); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-tr.started:
+	case <-time.After(time.Second):
+		t.Fatal("async work did not start")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	next, err := Dial(context.Background(), socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer next.Close()
+	stats, err := next.Stats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Leases != 2 || stats.Used != 16 {
+		t.Fatalf("stats while disconnected work is pending = %+v, want two live leases", stats)
+	}
+
+	close(tr.block)
+	deadline := time.Now().Add(time.Second)
+	for {
+		stats, err = next.Stats(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Leases == 0 && stats.Used == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("leases were not reclaimed after async work stopped: %+v", stats)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestClientAsyncWorkNeedsCollectiveTransport(t *testing.T) {
+	_, client, _, cleanup := startTestServer(t, 64)
+	defer cleanup()
+	defer client.Close()
+
+	src, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst, err := client.Alloc(context.Background(), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SubmitReduce(context.Background(), 0, 0, dst, src); err == nil || !strings.Contains(err.Error(), ErrNoTransport.Error()) {
+		t.Fatalf("SubmitReduce without collective transport = %v, want ErrNoTransport", err)
+	}
+}
+
 func TestCheckRange(t *testing.T) {
 	lease := allocator.Lease{ID: 7, Offset: 10, Length: 20}
 	leases := map[uint64]allocator.Lease{lease.ID: lease}
@@ -445,9 +581,13 @@ type transportCall struct {
 }
 
 type fakeTransport struct {
-	mu  sync.Mutex
-	err error
-	log []transportCall
+	mu            sync.Mutex
+	startOnce     sync.Once
+	err           error
+	block         chan struct{}
+	started       chan struct{}
+	ignoreContext bool
+	log           []transportCall
 }
 
 func newFakeTransport() *fakeTransport {
@@ -466,6 +606,36 @@ func (f *fakeTransport) Send(_ context.Context, peer int, offset, length int64) 
 
 func (f *fakeTransport) Recv(_ context.Context, peer int, offset, length int64) error {
 	f.record(transportCall{op: opRecv, peer: peer, offset: offset, length: length})
+	return f.err
+}
+
+func (f *fakeTransport) AllReduce(ctx context.Context, op, dt int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	f.record(transportCall{op: opSubmitReduce, offset: srcOffset, length: srcLength})
+	return f.finish(ctx)
+}
+
+func (f *fakeTransport) AllGather(ctx context.Context, elemSize int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	f.record(transportCall{op: opSubmitGather, offset: srcOffset, length: srcLength})
+	return f.finish(ctx)
+}
+
+func (f *fakeTransport) finish(ctx context.Context) error {
+	if f.started != nil {
+		f.startOnce.Do(func() {
+			close(f.started)
+		})
+	}
+	if f.block != nil {
+		if f.ignoreContext {
+			<-f.block
+			return f.err
+		}
+		select {
+		case <-f.block:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	return f.err
 }
 

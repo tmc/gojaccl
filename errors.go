@@ -12,8 +12,8 @@ var (
 	// ErrBusy reports that a group already has an active operation.
 	ErrBusy = errors.New("operation in progress")
 
-	// ErrDaemonCollective reports that daemon-backed collectives are not wired yet.
-	ErrDaemonCollective = errors.New("daemon backend collectives not yet implemented")
+	// ErrDaemonCollective reports unavailable daemon collective support.
+	ErrDaemonCollective = errors.New("daemon backend collective transport unavailable")
 )
 
 type opError struct {

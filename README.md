@@ -21,14 +21,12 @@ It keeps the device, protection domain, and global registered slab in one
 process and serves local clients over a Unix-domain socket. The daemon IPC
 protocol leases and maps the slab, exposes explicit resource session leases,
 then asks the daemon-owned RDMA transport to send, receive, or synchronize over
-slab offsets. Daemon-backed collectives are still a separate integration step
-because the current IPC protocol is synchronous and intentionally does not
-multiplex concurrent work.
+slab offsets. Daemon-backed collectives submit asynchronous work and wait for
+completion over the same control connection.
 
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
 `direct` selects it intentionally. `daemon` selects the IPC client backend for
-barrier and point-to-point operations. Daemon-backed collectives fail with a
-clear unsupported error until the transport-neutral collective layer is wired.
+barrier, point-to-point operations, and daemon-supported collectives.
 
 ## Status
 

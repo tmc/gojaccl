@@ -74,8 +74,8 @@ $ go test -v ./gojaccl/...
     --- PASS: TestAvailable/FalseWhenBackendUnavailable (0.00s)
 === RUN   TestDaemonBackendP2P
 --- PASS: TestDaemonBackendP2P (0.00s)
-=== RUN   TestDaemonBackendCollectivesUnsupported
---- PASS: TestDaemonBackendCollectivesUnsupported (0.00s)
+=== RUN   TestDaemonBackendCollectives
+--- PASS: TestDaemonBackendCollectives (0.00s)
 === RUN   TestNewGroup
 === RUN   TestNewGroup/InvalidConfigBeforeBackend
 === RUN   TestNewGroup/ContextCanceledBeforeStart
@@ -322,6 +322,14 @@ ok  	<module>/gojaccl/internal/allocator	0.020s
 --- PASS: TestServerReclaimsSessionsOnDisconnect (0.00s)
 === RUN   TestClientSessionOpsNeedResourceStore
 --- PASS: TestClientSessionOpsNeedResourceStore (0.00s)
+=== RUN   TestClientAsyncWorkDoesNotBlockConnection
+--- PASS: TestClientAsyncWorkDoesNotBlockConnection (0.00s)
+=== RUN   TestClientWaitWorkContext
+--- PASS: TestClientWaitWorkContext (0.00s)
+=== RUN   TestServerKeepsLeasesUntilAsyncWorkStopsOnDisconnect
+--- PASS: TestServerKeepsLeasesUntilAsyncWorkStopsOnDisconnect (0.05s)
+=== RUN   TestClientAsyncWorkNeedsCollectiveTransport
+--- PASS: TestClientAsyncWorkNeedsCollectiveTransport (0.00s)
 === RUN   TestCheckRange
 === RUN   TestCheckRange/UnknownLease
 === RUN   TestCheckRange/NegativePeer

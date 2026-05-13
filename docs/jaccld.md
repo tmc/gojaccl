@@ -7,8 +7,8 @@ resources in each process.
 Use of the daemon backend is explicit. `Config.Backend` accepts `auto`,
 `direct`, and `daemon`; empty means `auto`. `auto` uses the working direct
 backend today. `daemon` uses the jaccld IPC client for barrier and
-point-to-point operations; daemon-backed collectives remain explicitly
-unsupported until the IPC transport can support concurrent work.
+point-to-point operations. Daemon-backed collectives use asynchronous IPC work
+when the daemon transport supports collective work.
 
 ## Constraints
 
@@ -97,17 +97,20 @@ protocol is intentionally small:
 - `session_refresh`: extend a session lease deadline.
 - `session_close`: release a session lease.
 - `session_stats`: return resource-store use.
+- `submit_reduce`: start daemon-owned all-reduce work over leased slab ranges.
+- `submit_gather`: start daemon-owned all-gather work over leased slab ranges.
+- `wait_work`: poll asynchronous daemon work for completion.
 
 This is a control protocol, not a tensor planner. Tensor-parallel decisions and
 mesh placement remain outside `jaccld`.
 
-The initial IPC protocol is deliberately synchronous: one JSON request receives
-one JSON response on one Unix-domain socket connection. Slab leases are scoped
+Most IPC operations are request/response. Collective work is explicitly
+asynchronous: a submit request returns a work ID, and `wait_work` reports
+completion without blocking unrelated control requests. Slab leases are scoped
 to the connection that allocated them so the server can release memory when a
-client crashes. Resource session leases are also scoped to the connection, so
+client crashes, but disconnect waits for in-flight work to stop before freeing
+those leases. Resource session leases are also scoped to the connection, so
 disconnect releases the logical MR, queue-pair, and completion-queue handles.
-Do not move collectives above the backend until the IPC layer has an explicit
-asynchronous work protocol or equivalent design.
 
 ## Planner Data
 

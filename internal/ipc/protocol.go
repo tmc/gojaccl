@@ -31,6 +31,10 @@ const (
 	opSessionRefresh = "session_refresh"
 	opSessionClose   = "session_close"
 	opSessionStats   = "session_stats"
+
+	opSubmitReduce = "submit_reduce"
+	opSubmitGather = "submit_gather"
+	opWaitWork     = "wait_work"
 )
 
 // Request is one client control request.
@@ -55,6 +59,24 @@ type Request struct {
 	Heartbeat time.Duration `json:"heartbeat,omitempty"`
 	// SessionID identifies a resource session lease.
 	SessionID uint64 `json:"session_id,omitempty"`
+	// WorkID identifies an asynchronous daemon work item.
+	WorkID uint64 `json:"work_id,omitempty"`
+	// ReductionOp identifies the reduction operation for submit_reduce.
+	ReductionOp int `json:"reduction_op,omitempty"`
+	// DType identifies the element dtype for submit_reduce.
+	DType int `json:"dtype,omitempty"`
+	// ElementSize identifies one element size for submit_gather.
+	ElementSize int `json:"element_size,omitempty"`
+	// DstOffset and DstLength identify the destination slab range for async work.
+	DstOffset int64 `json:"dst_offset,omitempty"`
+	DstLength int64 `json:"dst_length,omitempty"`
+	// DstLeaseID identifies the destination slab lease for async work.
+	DstLeaseID uint64 `json:"dst_lease_id,omitempty"`
+	// SrcOffset and SrcLength identify the source slab range for async work.
+	SrcOffset int64 `json:"src_offset,omitempty"`
+	SrcLength int64 `json:"src_length,omitempty"`
+	// SrcLeaseID identifies the source slab lease for async work.
+	SrcLeaseID uint64 `json:"src_lease_id,omitempty"`
 }
 
 // Response is one daemon control response.
@@ -66,6 +88,9 @@ type Response struct {
 	SlabSize      int64                 `json:"slab_size,omitempty"`
 	Session       resource.SessionLease `json:"session,omitempty"`
 	ResourceStats resource.Stats        `json:"resource_stats,omitempty"`
+	WorkID        uint64                `json:"work_id,omitempty"`
+	Ready         bool                  `json:"ready,omitempty"`
+	WorkError     string                `json:"work_error,omitempty"`
 }
 
 func (r Response) err() error {

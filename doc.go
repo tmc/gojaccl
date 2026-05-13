@@ -8,8 +8,8 @@
 // coordinator address, the rank-by-rank RDMA device matrix, and whether a valid
 // ring topology should be preferred. It also records the backend mode. Empty
 // and "auto" use the working direct backend today; "daemon" uses the jaccld IPC
-// backend for barrier and point-to-point operations. Daemon-backed collectives
-// are not wired yet.
+// backend. Daemon-backed collectives use the daemon asynchronous work protocol
+// when the daemon transport supports collective work.
 //
 // NewGroup validates the configuration, creates the side channel, initializes
 // RDMA resources, and returns only after the group is ready. NewGroupFromEnv
