@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tmc/gojaccl/internal/allocator"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 )
 
 // Client is a local connection to jaccld.
@@ -113,6 +114,50 @@ func (c *Client) Stats(ctx context.Context) (allocator.Stats, error) {
 		return allocator.Stats{}, err
 	}
 	return resp.Stats, nil
+}
+
+// OpenSession requests a daemon resource session lease.
+func (c *Client) OpenSession(ctx context.Context, req resource.SessionRequest) (resource.SessionLease, error) {
+	resp, fds, err := c.do(ctx, Request{
+		Op:          opSessionOpen,
+		ClientID:    req.ClientID,
+		SessionPeer: req.Peer,
+		Size:        req.Size,
+		Deadline:    req.Deadline,
+		Heartbeat:   req.Heartbeat,
+	})
+	closeFDs(fds)
+	if err != nil {
+		return resource.SessionLease{}, err
+	}
+	return resp.Session, nil
+}
+
+// RefreshSession extends a resource session lease deadline.
+func (c *Client) RefreshSession(ctx context.Context, id resource.LeaseID, deadline time.Time) (resource.SessionLease, error) {
+	resp, fds, err := c.do(ctx, Request{Op: opSessionRefresh, SessionID: uint64(id), Deadline: deadline})
+	closeFDs(fds)
+	if err != nil {
+		return resource.SessionLease{}, err
+	}
+	return resp.Session, nil
+}
+
+// CloseSession releases a daemon resource session lease.
+func (c *Client) CloseSession(ctx context.Context, id resource.LeaseID) error {
+	_, fds, err := c.do(ctx, Request{Op: opSessionClose, SessionID: uint64(id)})
+	closeFDs(fds)
+	return err
+}
+
+// ResourceStats returns daemon resource store statistics.
+func (c *Client) ResourceStats(ctx context.Context) (resource.Stats, error) {
+	resp, fds, err := c.do(ctx, Request{Op: opSessionStats})
+	closeFDs(fds)
+	if err != nil {
+		return resource.Stats{}, err
+	}
+	return resp.ResourceStats, nil
 }
 
 // Map maps the daemon slab into this process.

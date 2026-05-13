@@ -38,7 +38,8 @@ On startup, `jaccld`:
 5. Creates queue pairs for the other daemon ranks and exchanges destinations
    on the TCP side channel.
 6. Starts RDMA-write heartbeat management for active queue pairs.
-7. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
+7. Starts a bounded resource session store for local clients.
+8. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
 
 The daemon releases RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not
@@ -92,6 +93,10 @@ protocol is intentionally small:
 - `recv`: ask the daemon transport to receive a peer transfer into a leased
   slab range.
 - `barrier`: ask the daemon transport to synchronize active peers.
+- `session_open`: lease a daemon-owned logical MR window and route handles.
+- `session_refresh`: extend a session lease deadline.
+- `session_close`: release a session lease.
+- `session_stats`: return resource-store use.
 
 This is a control protocol, not a tensor planner. Tensor-parallel decisions and
 mesh placement remain outside `jaccld`.
@@ -99,8 +104,10 @@ mesh placement remain outside `jaccld`.
 The initial IPC protocol is deliberately synchronous: one JSON request receives
 one JSON response on one Unix-domain socket connection. Slab leases are scoped
 to the connection that allocated them so the server can release memory when a
-client crashes. Do not move collectives above the backend until the IPC layer
-has an explicit asynchronous work protocol or equivalent design.
+client crashes. Resource session leases are also scoped to the connection, so
+disconnect releases the logical MR, queue-pair, and completion-queue handles.
+Do not move collectives above the backend until the IPC layer has an explicit
+asynchronous work protocol or equivalent design.
 
 ## Planner Data
 
@@ -125,6 +132,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
+- `internal/jaccld/resource`: bounded resource session leases and provider-free
+  pool interfaces.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions

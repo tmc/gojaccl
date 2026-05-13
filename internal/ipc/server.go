@@ -11,12 +11,14 @@ import (
 	"syscall"
 
 	"github.com/tmc/gojaccl/internal/allocator"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 )
 
 // Server serves local jaccld control requests.
 type Server struct {
 	slab      *allocator.Slab
 	transport Transport
+	resources *resource.Store
 }
 
 // Transport performs daemon-owned data movement over registered slab offsets.
@@ -28,13 +30,18 @@ type Transport interface {
 
 // NewServer returns a Server backed by slab.
 func NewServer(slab *allocator.Slab, transport Transport) (*Server, error) {
+	return NewServerWithResources(slab, transport, nil)
+}
+
+// NewServerWithResources returns a Server backed by slab and resources.
+func NewServerWithResources(slab *allocator.Slab, transport Transport, resources *resource.Store) (*Server, error) {
 	if slab == nil {
 		return nil, fmt.Errorf("new ipc server: nil slab")
 	}
 	if transport == nil {
 		transport = disabledTransport{}
 	}
-	return &Server{slab: slab, transport: transport}, nil
+	return &Server{slab: slab, transport: transport, resources: resources}, nil
 }
 
 // ListenAndServe listens on path and serves until ctx is canceled.
@@ -89,9 +96,15 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 	defer conn.Close()
 	leases := make(map[uint64]allocator.Lease)
+	sessions := make(map[resource.LeaseID]bool)
 	defer func() {
 		for id := range leases {
 			_ = s.slab.Free(id)
+		}
+		if s.resources != nil {
+			for id := range sessions {
+				_ = s.resources.Close(context.Background(), id)
+			}
 		}
 	}()
 	for {
@@ -158,6 +171,62 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 			_ = writeControl(conn, Response{OK: true, SlabSize: s.slab.Size()}, []int{fd})
 		case opStats:
 			_ = writeControl(conn, Response{OK: true, Stats: s.slab.Stats()}, nil)
+		case opSessionOpen:
+			if s.resources == nil {
+				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)
+				continue
+			}
+			lease, err := s.resources.Open(ctx, resource.SessionRequest{
+				ClientID:  req.ClientID,
+				Peer:      req.SessionPeer,
+				Size:      req.Size,
+				Deadline:  req.Deadline,
+				Heartbeat: req.Heartbeat,
+			})
+			if err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			sessions[lease.ID] = true
+			_ = writeControl(conn, Response{OK: true, Session: lease}, nil)
+		case opSessionRefresh:
+			if s.resources == nil {
+				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)
+				continue
+			}
+			id := resource.LeaseID(req.SessionID)
+			if !sessions[id] {
+				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
+				continue
+			}
+			lease, err := s.resources.Refresh(id, req.Deadline)
+			if err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true, Session: lease}, nil)
+		case opSessionClose:
+			if s.resources == nil {
+				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)
+				continue
+			}
+			id := resource.LeaseID(req.SessionID)
+			if !sessions[id] {
+				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
+				continue
+			}
+			if err := s.resources.Close(ctx, id); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			delete(sessions, id)
+			_ = writeControl(conn, Response{OK: true}, nil)
+		case opSessionStats:
+			if s.resources == nil {
+				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true, ResourceStats: s.resources.Stats()}, nil)
 		default:
 			_ = writeControl(conn, Response{Error: fmt.Sprintf("unknown op %q", req.Op)}, nil)
 		}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/gojaccl/internal/allocator"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 )
 
 func TestClientAllocMapFree(t *testing.T) {
@@ -167,6 +168,94 @@ func TestClientDataOpsNeedTransport(t *testing.T) {
 	}
 }
 
+func TestClientSessionLifecycle(t *testing.T) {
+	_, client, _, store, cleanup := startTestServerWithResourceStore(t, 64, nil, 2)
+	defer cleanup()
+	defer client.Close()
+
+	deadline := time.Now().Add(time.Minute)
+	lease, err := client.OpenSession(context.Background(), resource.SessionRequest{
+		ClientID: "client-1",
+		Peer:     resource.PeerSpec{Rank: 1},
+		Size:     16,
+		Deadline: deadline,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.ID == 0 || lease.Window.Offset != 0 || lease.Window.Length != 16 {
+		t.Fatalf("session lease = %+v, want id and 16-byte window", lease)
+	}
+	stats, err := client.ResourceStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Leases != 1 || stats.MemoryRegions.InUse != 1 || stats.QueuePairs.InUse != 1 || stats.CompletionQueues.InUse != 1 {
+		t.Fatalf("resource stats after open = %+v, want one live session", stats)
+	}
+	refreshed, err := client.RefreshSession(context.Background(), lease.ID, deadline.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !refreshed.ExpiresAt.Equal(deadline.Add(time.Minute)) {
+		t.Fatalf("refreshed deadline = %s, want %s", refreshed.ExpiresAt, deadline.Add(time.Minute))
+	}
+	if err := client.CloseSession(context.Background(), lease.ID); err != nil {
+		t.Fatal(err)
+	}
+	if stats := store.Stats(); stats.Leases != 0 || stats.MemoryRegions.InUse != 0 || stats.QueuePairs.InUse != 0 || stats.CompletionQueues.InUse != 0 {
+		t.Fatalf("resource stats after close = %+v, want empty", stats)
+	}
+}
+
+func TestServerReclaimsSessionsOnDisconnect(t *testing.T) {
+	_, client, _, store, cleanup := startTestServerWithResourceStore(t, 64, nil, 1)
+	defer cleanup()
+
+	lease, err := client.OpenSession(context.Background(), resource.SessionRequest{
+		ClientID: "client-1",
+		Peer:     resource.PeerSpec{Rank: 1},
+		Size:     16,
+		Deadline: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.ID == 0 {
+		t.Fatal("session ID = 0")
+	}
+	if err := client.Close(); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		st := store.Stats()
+		if st.Leases == 0 && st.MemoryRegions.InUse == 0 && st.QueuePairs.InUse == 0 && st.CompletionQueues.InUse == 0 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("session was not reclaimed after disconnect: %+v", st)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestClientSessionOpsNeedResourceStore(t *testing.T) {
+	_, client, _, cleanup := startTestServer(t, 64)
+	defer cleanup()
+	defer client.Close()
+
+	_, err := client.OpenSession(context.Background(), resource.SessionRequest{
+		ClientID: "client-1",
+		Peer:     resource.PeerSpec{Rank: 1},
+		Size:     16,
+		Deadline: time.Now().Add(time.Minute),
+	})
+	if err == nil || !strings.Contains(err.Error(), resource.ErrNotReady.Error()) {
+		t.Fatalf("OpenSession without store = %v, want ErrNotReady", err)
+	}
+}
+
 func TestCheckRange(t *testing.T) {
 	lease := allocator.Lease{ID: 7, Offset: 10, Length: 20}
 	leases := map[uint64]allocator.Lease{lease.ID: lease}
@@ -274,6 +363,78 @@ func startTestServerWithTransport(t *testing.T, size int64, transport Transport)
 		}
 		_ = os.Remove(socket)
 	}
+}
+
+func startTestServerWithResourceStore(t *testing.T, size int64, transport Transport, sessions int) (*allocator.Slab, *Client, string, *resource.Store, func()) {
+	t.Helper()
+	dir := t.TempDir()
+	slab, err := allocator.NewSlab(dir, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newTestResourceStore(t, slab, sessions)
+	server, err := NewServerWithResources(slab, transport, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join("/tmp", fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	ctx, cancel := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		errc <- server.ListenAndServe(ctx, socket)
+	}()
+	waitSocket(t, socket)
+	client, err := Dial(context.Background(), socket)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	return slab, client, socket, store, func() {
+		client.Close()
+		cancel()
+		select {
+		case err := <-errc:
+			if err != nil {
+				t.Errorf("server: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Error("server did not stop")
+		}
+		if err := slab.Close(); err != nil {
+			t.Errorf("slab close: %v", err)
+		}
+		_ = os.Remove(socket)
+	}
+}
+
+func newTestResourceStore(t *testing.T, slab *allocator.Slab, sessions int) *resource.Store {
+	t.Helper()
+	mr, err := resource.NewSlabMRPool(slab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qpHandles := make([]resource.QueuePairHandle, sessions)
+	cqHandles := make([]resource.CompletionQueueHandle, sessions)
+	for i := range qpHandles {
+		qpHandles[i] = resource.QueuePairHandle(fmt.Sprintf("qp-%d", i))
+		cqHandles[i] = resource.CompletionQueueHandle(fmt.Sprintf("cq-%d", i))
+	}
+	qp, err := resource.NewStaticQueuePairPool(qpHandles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cq, err := resource.NewStaticCompletionQueuePool(cqHandles)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := resource.NewStore(mr, qp, cq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetState(resource.StateReady); err != nil {
+		t.Fatal(err)
+	}
+	return store
 }
 
 type transportCall struct {

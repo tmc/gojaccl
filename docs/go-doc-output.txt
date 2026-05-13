@@ -109,9 +109,9 @@ Command jaccld owns local Apple RDMA resources for jaccl clients.
 Each daemon rank is started with -rank, -size, and -coordinator unless -no-rdma
 is set. The daemon opens one RDMA device, allocates one protection domain,
 registers one shared slab memory region, creates queue pairs for peer daemon
-ranks, starts RDMA-write heartbeats, and serves local clients through a
-Unix-domain socket. The daemon transport supports barrier, send, and recv over
-leased slab offsets.
+ranks, starts RDMA-write heartbeats, starts a bounded resource session store,
+and serves local clients through a Unix-domain socket. The daemon transport
+supports barrier, send, and recv over leased slab offsets.
 
 Idle heartbeats use one-byte RDMA writes to a reserved slab byte published by
 each peer daemon. They do not consume peer receive work requests.
@@ -145,7 +145,48 @@ type Request struct{ ... }
 type Response struct{ ... }
 type Server struct{ ... }
     func NewServer(slab *allocator.Slab, transport Transport) (*Server, error)
+    func NewServerWithResources(slab *allocator.Slab, transport Transport, resources *resource.Store) (*Server, error)
 type Transport interface{ ... }
+
+== gojaccl/internal/jaccld/resource ==
+
+$ go doc .
+package resource // import "./internal/jaccld/resource"
+
+Package resource defines jaccld's daemon-owned resource lease model.
+
+jaccld owns fragile RDMA resources for the life of the daemon process. Request
+handlers lease from resource pools; they do not open devices, allocate
+protection domains, register memory, or create queue pairs.
+
+The package is provider-free. It describes peer sessions, memory-region
+windows, queue-pair handles, and daemon state without importing the RDMA
+transport implementation. Hardware-backed pools can implement these interfaces
+later, after daemon startup has created the bounded resources.
+
+var ErrNotReady = errors.New("jaccld resource store not ready") ...
+type CompletionQueueHandle string
+type CompletionQueuePool interface{ ... }
+type LeaseID uint64
+type MRPool interface{ ... }
+type MRWindow struct{ ... }
+type PeerSpec struct{ ... }
+type PoolStats struct{ ... }
+type QueuePairHandle string
+type QueuePairPool interface{ ... }
+type RemoteMemory struct{ ... }
+type SessionLease struct{ ... }
+type SessionRequest struct{ ... }
+type SlabMRPool struct{ ... }
+    func NewSlabMRPool(slab *allocator.Slab) (*SlabMRPool, error)
+type State uint8
+type StaticCompletionQueuePool struct{ ... }
+    func NewStaticCompletionQueuePool(handles []CompletionQueueHandle) (*StaticCompletionQueuePool, error)
+type StaticQueuePairPool struct{ ... }
+    func NewStaticQueuePairPool(handles []QueuePairHandle) (*StaticQueuePairPool, error)
+type Stats struct{ ... }
+type Store struct{ ... }
+    func NewStore(mr MRPool, qp QueuePairPool, cq CompletionQueuePool) (*Store, error)
 
 == gojaccl/internal/keepalive ==
 

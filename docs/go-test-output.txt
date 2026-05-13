@@ -287,10 +287,6 @@ $ go test -v ./gojaccl/...
 PASS
 ok  	<module>/gojaccl	0.144s
 
-== gojaccl/cmd/jaccld ==
-
-?   	<module>/gojaccl/cmd/jaccld	[no test files]
-
 == gojaccl/internal/allocator ==
 
 === RUN   TestSlabAlloc
@@ -320,6 +316,12 @@ ok  	<module>/gojaccl/internal/allocator	0.020s
 --- PASS: TestClientSendRecvErrors (0.00s)
 === RUN   TestClientDataOpsNeedTransport
 --- PASS: TestClientDataOpsNeedTransport (0.00s)
+=== RUN   TestClientSessionLifecycle
+--- PASS: TestClientSessionLifecycle (0.00s)
+=== RUN   TestServerReclaimsSessionsOnDisconnect
+--- PASS: TestServerReclaimsSessionsOnDisconnect (0.00s)
+=== RUN   TestClientSessionOpsNeedResourceStore
+--- PASS: TestClientSessionOpsNeedResourceStore (0.00s)
 === RUN   TestCheckRange
 === RUN   TestCheckRange/UnknownLease
 === RUN   TestCheckRange/NegativePeer
@@ -336,8 +338,37 @@ ok  	<module>/gojaccl/internal/allocator	0.020s
     --- PASS: TestCheckRange/Overflow (0.00s)
 === RUN   TestDialMissingSocket
 --- PASS: TestDialMissingSocket (0.00s)
+=== RUN   TestServerSocketOwnerOnly
+--- PASS: TestServerSocketOwnerOnly (0.00s)
 PASS
 ok  	<module>/gojaccl/internal/ipc	0.020s
+
+== gojaccl/internal/jaccld/resource ==
+
+=== RUN   TestSlabMRPool
+--- PASS: TestSlabMRPool (0.00s)
+=== RUN   TestStaticQueuePairPool
+--- PASS: TestStaticQueuePairPool (0.00s)
+=== RUN   TestStaticCompletionQueuePool
+--- PASS: TestStaticCompletionQueuePool (0.00s)
+=== RUN   TestStoreOpenClose
+--- PASS: TestStoreOpenClose (0.00s)
+=== RUN   TestStoreNeedsReady
+--- PASS: TestStoreNeedsReady (0.00s)
+=== RUN   TestStoreRejectsBadRequests
+--- PASS: TestStoreRejectsBadRequests (0.00s)
+=== RUN   TestStoreExhaustionCleansUp
+--- PASS: TestStoreExhaustionCleansUp (0.00s)
+=== RUN   TestStoreReapsExpired
+--- PASS: TestStoreReapsExpired (0.00s)
+=== RUN   TestStoreRefresh
+--- PASS: TestStoreRefresh (0.00s)
+=== RUN   TestStoreStateTransitions
+--- PASS: TestStoreStateTransitions (0.00s)
+=== RUN   TestNoProviderImportsOrAllocationCalls
+--- PASS: TestNoProviderImportsOrAllocationCalls (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/jaccld/resource	0.020s
 
 == gojaccl/internal/keepalive ==
 

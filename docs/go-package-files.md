@@ -141,20 +141,46 @@ Package name: `ipc`.
 Files:
 
 - `protocol.go`: small JSON control protocol shared by client and server,
-  including slab lease, map, stats, barrier, send, and recv operations.
+  including slab lease, map, stats, barrier, send, recv, and resource session
+  operations.
 - `server.go`: Unix-domain socket server, `alloc`, `free`, `map`, `stats`, and
-  `SCM_RIGHTS` file descriptor passing, plus data-path dispatch through an
-  injected `Transport`.
+  `SCM_RIGHTS` file descriptor passing, resource session lifecycle dispatch,
+  plus data-path dispatch through an injected `Transport`.
 - `client.go`: local daemon client, slab mapping, data-path requests, and
-  connection lifecycle.
+  resource session requests.
 - `ipc_test.go`: hardware-free UDS, FD-passing, mmap, disconnect cleanup,
-  transport dispatch, lease-bound range validation, and missing-transport
-  tests.
+  transport dispatch, resource session cleanup, lease-bound range validation,
+  and missing-transport tests.
 
 Keep this package as a local control plane. It must not decide tensor placement
 or allocate RDMA hardware resources per connection. Data movement is expressed
 only as peer plus slab-offset ranges; the injected transport owns how those
 ranges reach RDMA.
+
+## `gojaccl/internal/jaccld/resource`
+
+Package name: `resource`.
+
+Files:
+
+- `doc.go`: package documentation and daemon resource invariants.
+- `types.go`: daemon state, peer specs, memory windows, session requests,
+  session leases, handles, stats, and errors.
+- `pool.go`: provider-free MR, queue-pair, and completion-queue pool
+  interfaces.
+- `store.go`: session lease store, state transitions, open, refresh, close,
+  expiry, cleanup, and stats.
+- `slab.go`: allocator-backed MR window pool.
+- `handle.go`: bounded static queue-pair and completion-queue handle pools for
+  offline session accounting.
+- `store_test.go`: lease lifecycle, state, validation, exhaustion, refresh, and
+  expiry tests.
+- `pool_test.go`: slab-backed MR and static-handle pool tests.
+- `static_test.go`: import and symbol guard preventing provider calls from
+  entering the resource package.
+
+Keep this package provider-free. Hardware-backed pools may implement these
+interfaces later, but request handlers should only talk to the store.
 
 ## `gojaccl/internal/keepalive`
 
@@ -175,9 +201,10 @@ Package name: `main`.
 
 Files:
 
-- `main.go`: command flags, signal handling, shared slab creation, singleton
-  RDMA device/protection-domain/MR startup, daemon rank validation, transport
-  injection, and IPC listener startup.
+- `main.go`: command flags, signal handling, shared slab creation, bounded
+  resource session store creation, singleton RDMA device/protection-domain/MR
+  startup, daemon rank validation, transport injection, and IPC listener
+  startup.
 - `transport.go`: daemon-owned RDMA point-to-point transport, side-channel
   destination exchange, queue-pair setup, slab-offset send and recv,
   RDMA-write heartbeat setup, barrier, and transport close behavior.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/tmc/gojaccl/internal/allocator"
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
 )
@@ -27,6 +28,7 @@ func main() {
 	flag.IntVar(&cfg.size, "size", 0, "number of daemon ranks")
 	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
+	flag.IntVar(&cfg.maxSessions, "max-sessions", 128, "maximum local resource sessions")
 	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "idle queue-pair heartbeat interval")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
@@ -45,6 +47,7 @@ type config struct {
 	size        int
 	coordinator string
 	slabSize    int64
+	maxSessions int
 	heartbeat   time.Duration
 	noRDMA      bool
 }
@@ -60,6 +63,10 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	defer slab.Close()
+	resources, err := newResourceStore(slab, cfg.maxSessions)
+	if err != nil {
+		return err
+	}
 
 	var heartbeat allocator.Lease
 	if !cfg.noRDMA {
@@ -98,11 +105,45 @@ func run(ctx context.Context, cfg config) error {
 		transport = rdmaTransport
 	}
 
-	server, err := ipc.NewServer(slab, transport)
+	server, err := ipc.NewServerWithResources(slab, transport, resources)
 	if err != nil {
 		return err
 	}
 	return server.ListenAndServe(ctx, cfg.socket)
+}
+
+func newResourceStore(slab *allocator.Slab, maxSessions int) (*resource.Store, error) {
+	if maxSessions <= 0 {
+		return nil, fmt.Errorf("max sessions %d must be positive", maxSessions)
+	}
+	mr, err := resource.NewSlabMRPool(slab)
+	if err != nil {
+		return nil, err
+	}
+	// TODO(hardware): Replace static handles with hardware-backed pools in a
+	// later hardware-gated slice.
+	qpHandles := make([]resource.QueuePairHandle, maxSessions)
+	cqHandles := make([]resource.CompletionQueueHandle, maxSessions)
+	for i := 0; i < maxSessions; i++ {
+		qpHandles[i] = resource.QueuePairHandle(fmt.Sprintf("qp-%d", i))
+		cqHandles[i] = resource.CompletionQueueHandle(fmt.Sprintf("cq-%d", i))
+	}
+	qp, err := resource.NewStaticQueuePairPool(qpHandles)
+	if err != nil {
+		return nil, err
+	}
+	cq, err := resource.NewStaticCompletionQueuePool(cqHandles)
+	if err != nil {
+		return nil, err
+	}
+	store, err := resource.NewStore(mr, qp, cq)
+	if err != nil {
+		return nil, err
+	}
+	if err := store.SetState(resource.StateReady); err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 func (cfg config) validateRDMA() error {

@@ -69,9 +69,10 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() {
 		errc <- run(ctx, config{
-			socket:   socket,
-			slabSize: 4096,
-			noRDMA:   true,
+			socket:      socket,
+			slabSize:    4096,
+			maxSessions: 2,
+			noRDMA:      true,
 		})
 	}()
 
@@ -84,6 +85,13 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	}
 	if stats.Size != 4096 {
 		t.Fatalf("stats size = %d, want 4096", stats.Size)
+	}
+	resourceStats, err := client.ResourceStats(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resourceStats.Leases != 0 || resourceStats.QueuePairs.Available != 2 || resourceStats.CompletionQueues.Available != 2 {
+		t.Fatalf("resource stats = %+v, want empty store with two handles", resourceStats)
 	}
 	if err := client.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), ipc.ErrNoTransport.Error()) {
 		t.Fatalf("Barrier = %v, want %q", err, ipc.ErrNoTransport)
