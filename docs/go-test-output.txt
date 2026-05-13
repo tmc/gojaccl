@@ -273,6 +273,51 @@ $ go test -v ./gojaccl/...
 PASS
 ok  	<module>/gojaccl	0.144s
 
+== gojaccl/cmd/jaccld ==
+
+?   	<module>/gojaccl/cmd/jaccld	[no test files]
+
+== gojaccl/internal/allocator ==
+
+=== RUN   TestSlabAlloc
+--- PASS: TestSlabAlloc (0.00s)
+=== RUN   TestSlabFreeCoalesces
+--- PASS: TestSlabFreeCoalesces (0.00s)
+=== RUN   TestSlabAllocRejectsBadSizes
+--- PASS: TestSlabAllocRejectsBadSizes (0.00s)
+=== RUN   TestSlabFreeRejectsUnknownLease
+--- PASS: TestSlabFreeRejectsUnknownLease (0.00s)
+=== RUN   TestSlabSharedMappingAndClose
+--- PASS: TestSlabSharedMappingAndClose (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/allocator	0.020s
+
+== gojaccl/internal/ipc ==
+
+=== RUN   TestClientAllocMapFree
+--- PASS: TestClientAllocMapFree (0.00s)
+=== RUN   TestServerReclaimsLeasesOnDisconnect
+--- PASS: TestServerReclaimsLeasesOnDisconnect (0.00s)
+=== RUN   TestClientReportsServerErrors
+--- PASS: TestClientReportsServerErrors (0.00s)
+=== RUN   TestDialMissingSocket
+--- PASS: TestDialMissingSocket (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/ipc	0.020s
+
+== gojaccl/internal/keepalive ==
+
+=== RUN   TestTrackerBeatsIdleRoutes
+--- PASS: TestTrackerBeatsIdleRoutes (0.00s)
+=== RUN   TestTrackerTouchDefersHeartbeat
+--- PASS: TestTrackerTouchDefersHeartbeat (0.00s)
+=== RUN   TestTrackerRecordsHeartbeatError
+--- PASS: TestTrackerRecordsHeartbeatError (0.00s)
+=== RUN   TestTrackerRejectsBadInput
+--- PASS: TestTrackerRejectsBadInput (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/keepalive	0.020s
+
 == gojaccl/internal/topology ==
 
 === RUN   TestValidateDeviceMatrix

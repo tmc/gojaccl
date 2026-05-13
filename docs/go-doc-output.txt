@@ -86,6 +86,55 @@ func (g *Group) Send(ctx context.Context, dst int, src []byte) error
 func (g *Group) Recv(ctx context.Context, src int, dst []byte) error
 func (g *Group) Close() error
 
+== gojaccl/cmd/jaccld ==
+
+$ go doc .
+package main // import "./cmd/jaccld"
+
+Command jaccld owns local Apple RDMA resources for jaccl clients.
+
+== gojaccl/internal/allocator ==
+
+$ go doc .
+package allocator // import "./internal/allocator"
+
+Package allocator provides the jaccld shared-memory slab allocator.
+
+var ErrClosed = errors.New("slab closed") ...
+type Lease struct{ ... }
+type Slab struct{ ... }
+    func NewSlab(dir string, size int64) (*Slab, error)
+type Stats struct{ ... }
+
+== gojaccl/internal/ipc ==
+
+$ go doc .
+package ipc // import "./internal/ipc"
+
+Package ipc implements the jaccld Unix-domain socket control protocol.
+
+const DefaultSocket = "/tmp/jaccld.sock"
+type Client struct{ ... }
+    func Dial(ctx context.Context, path string) (*Client, error)
+type Mapping struct{ ... }
+type Request struct{ ... }
+type Response struct{ ... }
+type Server struct{ ... }
+    func NewServer(slab *allocator.Slab) (*Server, error)
+
+== gojaccl/internal/keepalive ==
+
+$ go doc .
+package keepalive // import "./internal/keepalive"
+
+Package keepalive tracks idle routes that need daemon-owned heartbeats.
+
+type Sender interface{ ... }
+type SenderFunc func(context.Context) error
+type Status struct{ ... }
+type Tracker struct{ ... }
+    func New(interval time.Duration) (*Tracker, error)
+
 == gojaccl/internal/rdma ==
 
 $ go doc .

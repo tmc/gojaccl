@@ -16,6 +16,12 @@ The implementation keeps RDMA details internal. Callers pass ordinary Go
 slices; the backend copies through persistent mmap-backed staging buffers and
 does not register caller heap memory in the hot path.
 
+`cmd/jaccld` is the daemon path for macOS Thunderbolt RDMA resource ownership.
+It keeps the device, protection domain, and global registered slab in one
+process and serves local clients over a Unix-domain socket. The daemon building
+blocks are present; wiring the public collectives to the daemon IPC client is a
+separate integration step.
+
 ## Status
 
 The non-hardware Go surface is implementation-ready:
@@ -49,3 +55,4 @@ Design and validation artifacts live under `docs/`:
 - `docs/go-package-files.md`
 - `docs/go-doc-output.txt`
 - `docs/go-test-output.txt`
+- `docs/jaccld.md`

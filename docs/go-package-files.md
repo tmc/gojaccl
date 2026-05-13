@@ -111,6 +111,64 @@ fixed in the generator or binding source, not by hand-editing generated files.
 If `rdma_darwin_arm64.go` becomes too large to navigate after implementation,
 split it by measured subsystem size, not before.
 
+## `gojaccl/internal/allocator`
+
+Package name: `allocator`.
+
+Files:
+
+- `slab.go`: file-backed shared-memory slab, immediate unlink after mmap,
+  logical byte-range leases, lease coalescing, FD access for descriptor
+  passing, mmap lifecycle, and stats.
+- `slab_test.go`: allocation, free/coalesce, error, shared mapping, and close
+  tests.
+
+Keep this package independent of RDMA verbs and IPC. It is lease math plus the
+shared backing store.
+
+## `gojaccl/internal/ipc`
+
+Package name: `ipc`.
+
+Files:
+
+- `protocol.go`: small JSON control protocol shared by client and server.
+- `server.go`: Unix-domain socket server, `alloc`, `free`, `map`, `stats`, and
+  `SCM_RIGHTS` file descriptor passing.
+- `client.go`: local daemon client, slab mapping, and connection lifecycle.
+- `ipc_test.go`: hardware-free UDS, FD-passing, mmap, and disconnect cleanup
+  tests.
+
+Keep this package as a local control plane. It must not decide tensor placement
+or allocate RDMA hardware resources per connection.
+
+## `gojaccl/internal/keepalive`
+
+Package name: `keepalive`.
+
+Files:
+
+- `heartbeat.go`: idle-route tracker and heartbeat sender abstraction.
+- `heartbeat_test.go`: idle, touch, error, and bad-input tests using fake
+  senders and a fake clock.
+
+This package schedules daemon-owned keepalives. It does not know the RDMA
+queue-pair type directly; callers adapt a queue pair with a small sender.
+
+## `gojaccl/cmd/jaccld`
+
+Package name: `main`.
+
+Files:
+
+- `main.go`: command flags, signal handling, shared slab creation, singleton
+  RDMA device/protection-domain/MR startup, keepalive manager startup, and IPC
+  listener startup.
+
+The command may be run with `-no-rdma` for local IPC development, but production
+startup must open the hardware and register the single global slab before
+serving clients.
+
 ## Files Not To Add Yet
 
 - Do not add `go.sum` directly.
@@ -118,5 +176,5 @@ split it by measured subsystem size, not before.
 - Do not add public `mesh`, `ring`, `dtype`, `rdma`, or `tcpchan` packages.
 - Do not add `Float16` or `BFloat16` public files until parity tests against
   C++ JACCL semantics exist.
-- Do not add command packages or examples directories until the package API is
-  implemented and the tests can run real examples.
+- Do not add examples directories until the package API is implemented and the
+  tests can run real examples.
