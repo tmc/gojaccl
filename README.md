@@ -1,0 +1,51 @@
+# gojaccl
+
+gojaccl is a Go implementation sketch of JACCL, the MLX collective
+communication library for Apple RDMA over Thunderbolt.
+
+The public package is `jaccl`. It exposes a small synchronous API around a live
+communication group:
+
+- `NewGroup` and `NewGroupFromEnv` initialize a rank.
+- `Barrier`, `Send`, and `Recv` provide control and byte-oriented point-to-point
+  operations.
+- `AllSum`, `AllMax`, `AllMin`, and `AllGather` provide typed collectives over
+  the supported `Element` types.
+
+The implementation keeps RDMA details internal. Callers pass ordinary Go
+slices; the backend copies through persistent mmap-backed staging buffers and
+does not register caller heap memory in the hot path.
+
+## Status
+
+The non-hardware Go surface is implementation-ready:
+
+```sh
+CGO_ENABLED=0 go test ./...
+```
+
+Hardware RDMA tests are intentionally not part of ordinary validation on macOS.
+Tests that transition queue pairs to RTR require explicit one-shot operator
+confirmation:
+
+```sh
+JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -run '^TestIntegration' .
+```
+
+macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
+do not run the RTR gate casually.
+
+## Dependency
+
+This module currently uses a local `replace` for `github.com/tmc/apple` because
+the required generated RDMA binding surface is not in the published
+`github.com/tmc/apple` tags available in this workspace.
+
+## Documents
+
+Design and validation artifacts live under `docs/`:
+
+- `docs/go-jaccl-spec.md`
+- `docs/go-package-files.md`
+- `docs/go-doc-output.txt`
+- `docs/go-test-output.txt`

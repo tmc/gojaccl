@@ -1,0 +1,140 @@
+Simulated ideal `go doc .` output for the gojaccl packages.
+
+This file describes the intended documentation surface for the current
+implementation.
+
+== gojaccl ==
+
+$ go doc .
+package jaccl // import "."
+
+Package jaccl provides collective communication over Apple RDMA.
+
+A Group is a live communicator. It reports the local rank and group size, runs
+blocking collectives with context cancellation, and releases RDMA resources with
+Close.
+
+Configuration is explicit. Config records the local rank, the rank-zero
+coordinator address, the rank-by-rank RDMA device matrix, and whether a valid
+ring topology should be preferred.
+
+NewGroup validates the configuration, creates the side channel, initializes
+RDMA resources, and returns only after the group is ready. NewGroupFromEnv
+reads the JACCL_RANK, JACCL_IBV_DEVICES, JACCL_COORDINATOR, and JACCL_RING
+environment variables, with MLX_* fallbacks matching MLX JACCL.
+
+Errors include operation and rank context when available.
+
+Collectives such as AllSum and AllGather are generic functions constrained to
+supported Element types. Send and Recv move opaque byte slices for
+point-to-point traffic.
+
+Collectives must be called in the same order on every rank. A single Group
+permits at most one active collective or point-to-point operation at a time.
+
+The first implementation target is darwin/arm64 using the purego
+github.com/tmc/apple/rdma bindings.
+
+Collective functions validate slice lengths before posting RDMA work. AllSum,
+AllMax, and AllMin require dst and src to have the same length. They support
+in-place operation when dst and src are the same slice. AllGather requires
+len(dst) == g.Size()*len(src). Implementations must reject invalid lengths
+before touching RDMA state.
+
+The RDMA backend copies through internal registered staging buffers. Callers do
+not need to provide page-aligned or registered memory.
+
+Float16 and BFloat16 are deferred until the Go implementation has explicit
+types and parity tests for the C++ JACCL semantics.
+
+func AllGather[T Element](ctx context.Context, g *Group, dst, src []T) error
+func AllMax[T Element](ctx context.Context, g *Group, dst, src []T) error
+func AllMin[T Element](ctx context.Context, g *Group, dst, src []T) error
+func AllSum[T Element](ctx context.Context, g *Group, dst, src []T) error
+func Available() bool
+func ConfigFromEnv() (Config, error)
+func NewGroup(ctx context.Context, cfg Config) (*Group, error)
+func NewGroupFromEnv(ctx context.Context) (*Group, error)
+
+type Config struct {
+	// Rank is this process's zero-based rank.
+	Rank        int
+	// Coordinator is the rank-zero TCP side-channel address, host:port.
+	Coordinator string
+	// Devices is indexed as [src][dst][wire] and names RDMA device paths.
+	// Mesh configurations use one usable path for every non-self peer.
+	// Ring configurations use adjacent links and may have multiple wires.
+	Devices     [][][]string
+	// PreferRing asks NewGroup to choose ring when the matrix is valid for it.
+	PreferRing  bool
+}
+
+type Element interface {
+	bool | int8 | int16 | int32 | int64 |
+		uint8 | uint16 | uint32 | uint64 |
+		float32 | float64 | complex64
+}
+
+type Group struct {
+	// contains filtered or unexported fields
+}
+
+func (g *Group) Rank() int
+func (g *Group) Size() int
+func (g *Group) Barrier(ctx context.Context) error
+func (g *Group) Send(ctx context.Context, dst int, src []byte) error
+func (g *Group) Recv(ctx context.Context, src int, dst []byte) error
+func (g *Group) Close() error
+
+== gojaccl/internal/rdma ==
+
+$ go doc .
+package rdma // import "./internal/rdma"
+
+Package rdma wraps the Apple RDMA verbs used by jaccl.
+
+This package is the boundary between jaccl's communicator logic and the
+generated github.com/tmc/apple/rdma bindings. It owns device discovery,
+protection domains, completion queues, queue pairs, memory registration, work
+requests, and completion polling.
+
+Registered memory used by jaccl operations is mmap-backed staging memory owned
+by the backend. The public package must not expose memory registration or
+require callers to pass registered buffers.
+
+The package must not use cgo. Missing or incorrect generated binding details
+should be fixed in the generator and regenerated, not hand-edited here.
+
+== gojaccl/internal/reduce ==
+
+$ go doc .
+package reduce // import "./internal/reduce"
+
+Package reduce maps jaccl element types to local reduction kernels.
+
+The package implements the local sum, max, and min operations used while moving
+data through RDMA staging buffers. Its type dispatch must match the public
+jaccl Element constraint and the dtype semantics of the C++ JACCL backend.
+
+== gojaccl/internal/tcpchan ==
+
+$ go doc .
+package tcpchan // import "./internal/tcpchan"
+
+Package tcpchan implements jaccl's TCP side channel.
+
+The side channel exchanges rank metadata and RDMA destination data before queue
+pairs are ready for RDMA traffic. It also provides the initialization barriers
+needed to keep ranks from advancing before every peer has published its
+destination information.
+
+== gojaccl/internal/topology ==
+
+$ go doc .
+package topology // import "./internal/topology"
+
+Package topology validates jaccl device connectivity.
+
+The input is the rank-by-rank device matrix used by MLX JACCL. A valid mesh has
+one usable device path for every non-self peer. A valid ring has matching
+adjacent links and may contain multiple wires per neighbor.

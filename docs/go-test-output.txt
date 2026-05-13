@@ -1,0 +1,630 @@
+Simulated ideal `go test -v ./...` output for the gojaccl packages.
+
+This file is a test development target for module github.com/tmc/gojaccl.
+
+The default run must pass without RDMA hardware. Hardware-backed integration
+tests are still present in the transcript, but they skip unless explicitly
+enabled by environment. Tests that transition queue pairs to RTR require both
+JACCL_TEST_RDMA=1 and JACCL_TEST_RDMA_ALLOW_RTR=1; JACCL_TEST_RDMA=1 alone is
+reserved for discovery and safe failure-path checks.
+
+$ go test -v ./gojaccl/...
+
+== gojaccl ==
+
+=== RUN   TestConfigFromEnv
+=== RUN   TestConfigFromEnv/JACCLValues
+=== RUN   TestConfigFromEnv/MLXFallbackValues
+=== RUN   TestConfigFromEnv/JACCLOverridesMLXFallback
+=== RUN   TestConfigFromEnv/MissingRank
+=== RUN   TestConfigFromEnv/InvalidRank
+=== RUN   TestConfigFromEnv/MissingCoordinator
+=== RUN   TestConfigFromEnv/MissingDevices
+=== RUN   TestConfigFromEnv/InvalidDevicesJSON
+=== RUN   TestConfigFromEnv/PreferRingTrue
+=== RUN   TestConfigFromEnv/PreferRingFalse
+--- PASS: TestConfigFromEnv (0.00s)
+    --- PASS: TestConfigFromEnv/JACCLValues (0.00s)
+    --- PASS: TestConfigFromEnv/MLXFallbackValues (0.00s)
+    --- PASS: TestConfigFromEnv/JACCLOverridesMLXFallback (0.00s)
+    --- PASS: TestConfigFromEnv/MissingRank (0.00s)
+    --- PASS: TestConfigFromEnv/InvalidRank (0.00s)
+    --- PASS: TestConfigFromEnv/MissingCoordinator (0.00s)
+    --- PASS: TestConfigFromEnv/MissingDevices (0.00s)
+    --- PASS: TestConfigFromEnv/InvalidDevicesJSON (0.00s)
+    --- PASS: TestConfigFromEnv/PreferRingTrue (0.00s)
+    --- PASS: TestConfigFromEnv/PreferRingFalse (0.00s)
+=== RUN   TestConfigValidate
+=== RUN   TestConfigValidate/TwoRankMesh
+=== RUN   TestConfigValidate/TwoRankRing
+=== RUN   TestConfigValidate/ThreeRankMesh
+=== RUN   TestConfigValidate/NegativeRank
+=== RUN   TestConfigValidate/RankOutOfBounds
+=== RUN   TestConfigValidate/EmptyCoordinator
+=== RUN   TestConfigValidate/EmptyDeviceMatrix
+=== RUN   TestConfigValidate/NonSquareDeviceMatrix
+=== RUN   TestConfigValidate/RaggedDeviceMatrix
+=== RUN   TestConfigValidate/NoUsableTopology
+--- PASS: TestConfigValidate (0.00s)
+    --- PASS: TestConfigValidate/TwoRankMesh (0.00s)
+    --- PASS: TestConfigValidate/TwoRankRing (0.00s)
+    --- PASS: TestConfigValidate/ThreeRankMesh (0.00s)
+    --- PASS: TestConfigValidate/NegativeRank (0.00s)
+    --- PASS: TestConfigValidate/RankOutOfBounds (0.00s)
+    --- PASS: TestConfigValidate/EmptyCoordinator (0.00s)
+    --- PASS: TestConfigValidate/EmptyDeviceMatrix (0.00s)
+    --- PASS: TestConfigValidate/NonSquareDeviceMatrix (0.00s)
+    --- PASS: TestConfigValidate/RaggedDeviceMatrix (0.00s)
+    --- PASS: TestConfigValidate/NoUsableTopology (0.00s)
+=== RUN   TestAvailable
+=== RUN   TestAvailable/NeverPanics
+=== RUN   TestAvailable/FalseWhenBackendUnavailable
+--- PASS: TestAvailable (0.00s)
+    --- PASS: TestAvailable/NeverPanics (0.00s)
+    --- PASS: TestAvailable/FalseWhenBackendUnavailable (0.00s)
+=== RUN   TestNewGroup
+=== RUN   TestNewGroup/InvalidConfigBeforeBackend
+=== RUN   TestNewGroup/ContextCanceledBeforeStart
+=== RUN   TestNewGroup/ContextDeadlineDuringSideChannel
+=== RUN   TestNewGroup/FakeBackendInitializes
+=== RUN   TestNewGroup/ReadyBeforeReturn
+=== RUN   TestNewGroup/ErrorIncludesOperationAndRank
+--- PASS: TestNewGroup (0.01s)
+    --- PASS: TestNewGroup/InvalidConfigBeforeBackend (0.00s)
+    --- PASS: TestNewGroup/ContextCanceledBeforeStart (0.00s)
+    --- PASS: TestNewGroup/ContextDeadlineDuringSideChannel (0.00s)
+    --- PASS: TestNewGroup/FakeBackendInitializes (0.00s)
+    --- PASS: TestNewGroup/ReadyBeforeReturn (0.00s)
+    --- PASS: TestNewGroup/ErrorIncludesOperationAndRank (0.00s)
+=== RUN   TestNewGroupFromEnv
+=== RUN   TestNewGroupFromEnv/UsesConfigFromEnv
+=== RUN   TestNewGroupFromEnv/PropagatesContext
+=== RUN   TestNewGroupFromEnv/WrapsConfigError
+--- PASS: TestNewGroupFromEnv (0.00s)
+    --- PASS: TestNewGroupFromEnv/UsesConfigFromEnv (0.00s)
+    --- PASS: TestNewGroupFromEnv/PropagatesContext (0.00s)
+    --- PASS: TestNewGroupFromEnv/WrapsConfigError (0.00s)
+=== RUN   TestGroupRankSize
+=== RUN   TestGroupRankSize/RankZero
+=== RUN   TestGroupRankSize/RankOneOfTwo
+--- PASS: TestGroupRankSize (0.00s)
+    --- PASS: TestGroupRankSize/RankZero (0.00s)
+    --- PASS: TestGroupRankSize/RankOneOfTwo (0.00s)
+=== RUN   TestGroupClose
+=== RUN   TestGroupClose/Idempotent
+=== RUN   TestGroupClose/ReleasesResourcesInReverseOrder
+=== RUN   TestGroupClose/ConcurrentClose
+=== RUN   TestGroupClose/OperationAfterClose
+--- PASS: TestGroupClose (0.00s)
+    --- PASS: TestGroupClose/Idempotent (0.00s)
+    --- PASS: TestGroupClose/ReleasesResourcesInReverseOrder (0.00s)
+    --- PASS: TestGroupClose/ConcurrentClose (0.00s)
+    --- PASS: TestGroupClose/OperationAfterClose (0.00s)
+=== RUN   TestBarrier
+=== RUN   TestBarrier/FakeTwoRankBarrier
+=== RUN   TestBarrier/ContextCancellation
+=== RUN   TestBarrier/ErrorIncludesRank
+=== RUN   TestBarrier/ReturnsClosedGroupError
+--- PASS: TestBarrier (0.01s)
+    --- PASS: TestBarrier/FakeTwoRankBarrier (0.00s)
+    --- PASS: TestBarrier/ContextCancellation (0.00s)
+    --- PASS: TestBarrier/ErrorIncludesRank (0.00s)
+    --- PASS: TestBarrier/ReturnsClosedGroupError (0.00s)
+=== RUN   TestSendRecv
+=== RUN   TestSendRecv/OpaqueBytes
+=== RUN   TestSendRecv/ZeroLengthPayload
+=== RUN   TestSendRecv/InvalidDestinationRank
+=== RUN   TestSendRecv/InvalidSourceRank
+=== RUN   TestSendRecv/ContextCancellation
+=== RUN   TestSendRecv/ShortReceiveBuffer
+=== RUN   TestSendRecv/RingRejectsNonNeighborSend
+=== RUN   TestSendRecv/RingRejectsNonNeighborRecv
+--- PASS: TestSendRecv (0.01s)
+    --- PASS: TestSendRecv/OpaqueBytes (0.00s)
+    --- PASS: TestSendRecv/ZeroLengthPayload (0.00s)
+    --- PASS: TestSendRecv/InvalidDestinationRank (0.00s)
+    --- PASS: TestSendRecv/InvalidSourceRank (0.00s)
+    --- PASS: TestSendRecv/ContextCancellation (0.00s)
+    --- PASS: TestSendRecv/ShortReceiveBuffer (0.00s)
+    --- PASS: TestSendRecv/RingRejectsNonNeighborSend (0.00s)
+    --- PASS: TestSendRecv/RingRejectsNonNeighborRecv (0.00s)
+=== RUN   TestCollectiveLengthValidation
+=== RUN   TestCollectiveLengthValidation/AllSumSameLength
+=== RUN   TestCollectiveLengthValidation/AllSumRejectsMismatchBeforeBackend
+=== RUN   TestCollectiveLengthValidation/AllMaxRejectsMismatchBeforeBackend
+=== RUN   TestCollectiveLengthValidation/AllMinRejectsMismatchBeforeBackend
+=== RUN   TestCollectiveLengthValidation/AllGatherRequiresSizeTimesInput
+=== RUN   TestCollectiveLengthValidation/AllGatherRejectsMismatchBeforeBackend
+=== RUN   TestCollectiveLengthValidation/AllGatherRejectsAliasedSlices
+=== RUN   TestCollectiveLengthValidation/NilSlicesAllowedWhenLengthsMatch
+--- PASS: TestCollectiveLengthValidation (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllSumSameLength (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllSumRejectsMismatchBeforeBackend (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllMaxRejectsMismatchBeforeBackend (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllMinRejectsMismatchBeforeBackend (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllGatherRequiresSizeTimesInput (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllGatherRejectsMismatchBeforeBackend (0.00s)
+    --- PASS: TestCollectiveLengthValidation/AllGatherRejectsAliasedSlices (0.00s)
+    --- PASS: TestCollectiveLengthValidation/NilSlicesAllowedWhenLengthsMatch (0.00s)
+=== RUN   TestCollectiveContextCancellation
+=== RUN   TestCollectiveContextCancellation/AllSum
+=== RUN   TestCollectiveContextCancellation/AllMax
+=== RUN   TestCollectiveContextCancellation/AllMin
+=== RUN   TestCollectiveContextCancellation/AllGather
+--- PASS: TestCollectiveContextCancellation (0.01s)
+    --- PASS: TestCollectiveContextCancellation/AllSum (0.00s)
+    --- PASS: TestCollectiveContextCancellation/AllMax (0.00s)
+    --- PASS: TestCollectiveContextCancellation/AllMin (0.00s)
+    --- PASS: TestCollectiveContextCancellation/AllGather (0.00s)
+=== RUN   TestCollectiveZeroLength
+=== RUN   TestCollectiveZeroLength/AllSum
+=== RUN   TestCollectiveZeroLength/AllMax
+=== RUN   TestCollectiveZeroLength/AllMin
+=== RUN   TestCollectiveZeroLength/AllGather
+--- PASS: TestCollectiveZeroLength (0.00s)
+    --- PASS: TestCollectiveZeroLength/AllSum (0.00s)
+    --- PASS: TestCollectiveZeroLength/AllMax (0.00s)
+    --- PASS: TestCollectiveZeroLength/AllMin (0.00s)
+    --- PASS: TestCollectiveZeroLength/AllGather (0.00s)
+=== RUN   TestCollectiveInPlaceReductions
+=== RUN   TestCollectiveInPlaceReductions/AllSum
+=== RUN   TestCollectiveInPlaceReductions/AllMax
+=== RUN   TestCollectiveInPlaceReductions/AllMin
+--- PASS: TestCollectiveInPlaceReductions (0.00s)
+    --- PASS: TestCollectiveInPlaceReductions/AllSum (0.00s)
+    --- PASS: TestCollectiveInPlaceReductions/AllMax (0.00s)
+    --- PASS: TestCollectiveInPlaceReductions/AllMin (0.00s)
+=== RUN   TestCollectiveElementDispatch
+=== RUN   TestCollectiveElementDispatch/Bool
+=== RUN   TestCollectiveElementDispatch/Int8
+=== RUN   TestCollectiveElementDispatch/Int16
+=== RUN   TestCollectiveElementDispatch/Int32
+=== RUN   TestCollectiveElementDispatch/Int64
+=== RUN   TestCollectiveElementDispatch/Uint8
+=== RUN   TestCollectiveElementDispatch/Uint16
+=== RUN   TestCollectiveElementDispatch/Uint32
+=== RUN   TestCollectiveElementDispatch/Uint64
+=== RUN   TestCollectiveElementDispatch/Float32
+=== RUN   TestCollectiveElementDispatch/Float64
+=== RUN   TestCollectiveElementDispatch/Complex64
+--- PASS: TestCollectiveElementDispatch (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Bool (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Int8 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Int16 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Int32 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Int64 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Uint8 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Uint16 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Uint32 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Uint64 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Float32 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Float64 (0.00s)
+    --- PASS: TestCollectiveElementDispatch/Complex64 (0.00s)
+=== RUN   TestElementConstraint
+=== RUN   TestElementConstraint/AcceptsSupportedTypes
+=== RUN   TestElementConstraint/RejectsString
+=== RUN   TestElementConstraint/RejectsSlice
+=== RUN   TestElementConstraint/RejectsMap
+=== RUN   TestElementConstraint/RejectsPointer
+=== RUN   TestElementConstraint/RejectsInterface
+=== RUN   TestElementConstraint/RejectsFloat16AliasUntilAdded
+=== RUN   TestElementConstraint/RejectsBFloat16AliasUntilAdded
+--- PASS: TestElementConstraint (0.08s)
+    --- PASS: TestElementConstraint/AcceptsSupportedTypes (0.01s)
+    --- PASS: TestElementConstraint/RejectsString (0.01s)
+    --- PASS: TestElementConstraint/RejectsSlice (0.01s)
+    --- PASS: TestElementConstraint/RejectsMap (0.01s)
+    --- PASS: TestElementConstraint/RejectsPointer (0.01s)
+    --- PASS: TestElementConstraint/RejectsInterface (0.01s)
+    --- PASS: TestElementConstraint/RejectsFloat16AliasUntilAdded (0.01s)
+    --- PASS: TestElementConstraint/RejectsBFloat16AliasUntilAdded (0.01s)
+=== RUN   TestOperationSerialization
+=== RUN   TestOperationSerialization/SecondOperationRunsAfterFirstCompletes
+=== RUN   TestOperationSerialization/SecondOperationWaitsUntilContextDone
+=== RUN   TestOperationSerialization/InvalidOperationDoesNotTouchBackend
+=== RUN   TestOperationSerialization/CloseDuringOperationCancelsWaiters
+--- PASS: TestOperationSerialization (0.01s)
+    --- PASS: TestOperationSerialization/SecondOperationRunsAfterFirstCompletes (0.00s)
+    --- PASS: TestOperationSerialization/SecondOperationWaitsUntilContextDone (0.00s)
+    --- PASS: TestOperationSerialization/InvalidOperationDoesNotTouchBackend (0.00s)
+    --- PASS: TestOperationSerialization/CloseDuringOperationCancelsWaiters (0.00s)
+=== RUN   TestErrorContext
+=== RUN   TestErrorContext/IncludesPackagePrefix
+=== RUN   TestErrorContext/IncludesRankWhenKnown
+=== RUN   TestErrorContext/IncludesOperation
+=== RUN   TestErrorContext/WrapsContextError
+--- PASS: TestErrorContext (0.00s)
+    --- PASS: TestErrorContext/IncludesPackagePrefix (0.00s)
+    --- PASS: TestErrorContext/IncludesRankWhenKnown (0.00s)
+    --- PASS: TestErrorContext/IncludesOperation (0.00s)
+    --- PASS: TestErrorContext/WrapsContextError (0.00s)
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
+=== RUN   TestIntegrationTwoRankAllMax
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationTwoRankAllMax (0.00s)
+=== RUN   TestIntegrationTwoRankAllMin
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationTwoRankAllMin (0.00s)
+=== RUN   TestIntegrationTwoRankAllGather
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationTwoRankAllGather (0.00s)
+=== RUN   TestIntegrationTwoRankSendRecv
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationTwoRankSendRecv (0.00s)
+=== RUN   TestIntegrationPeerFailure
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationPeerFailure (0.00s)
+=== RUN   TestIntegrationRingPreferredWhenValid
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationRingPreferredWhenValid (0.00s)
+=== RUN   TestIntegrationMeshFallbackWhenRingInvalid
+    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+--- SKIP: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
+=== RUN   Example
+--- PASS: Example (0.00s)
+=== RUN   ExampleConfigFromEnv
+--- PASS: ExampleConfigFromEnv (0.00s)
+=== RUN   ExampleGroup_Barrier
+--- PASS: ExampleGroup_Barrier (0.00s)
+=== RUN   ExampleAllSum
+--- PASS: ExampleAllSum (0.00s)
+PASS
+ok  	<module>/gojaccl	0.144s
+
+== gojaccl/internal/topology ==
+
+=== RUN   TestValidateDeviceMatrix
+=== RUN   TestValidateDeviceMatrix/TwoRankSquare
+=== RUN   TestValidateDeviceMatrix/ThreeRankSquare
+=== RUN   TestValidateDeviceMatrix/RejectEmpty
+=== RUN   TestValidateDeviceMatrix/RejectNonSquare
+=== RUN   TestValidateDeviceMatrix/RejectRaggedRows
+=== RUN   TestValidateDeviceMatrix/RejectNilPeerEntries
+--- PASS: TestValidateDeviceMatrix (0.00s)
+    --- PASS: TestValidateDeviceMatrix/TwoRankSquare (0.00s)
+    --- PASS: TestValidateDeviceMatrix/ThreeRankSquare (0.00s)
+    --- PASS: TestValidateDeviceMatrix/RejectEmpty (0.00s)
+    --- PASS: TestValidateDeviceMatrix/RejectNonSquare (0.00s)
+    --- PASS: TestValidateDeviceMatrix/RejectRaggedRows (0.00s)
+    --- PASS: TestValidateDeviceMatrix/RejectNilPeerEntries (0.00s)
+=== RUN   TestValidateMesh
+=== RUN   TestValidateMesh/TwoRankSymmetric
+=== RUN   TestValidateMesh/ThreeRankFull
+=== RUN   TestValidateMesh/SelfLinksIgnored
+=== RUN   TestValidateMesh/MultipleWiresAllowed
+=== RUN   TestValidateMesh/RejectMissingPeerPath
+=== RUN   TestValidateMesh/RejectOneWayPeerPath
+--- PASS: TestValidateMesh (0.00s)
+    --- PASS: TestValidateMesh/TwoRankSymmetric (0.00s)
+    --- PASS: TestValidateMesh/ThreeRankFull (0.00s)
+    --- PASS: TestValidateMesh/SelfLinksIgnored (0.00s)
+    --- PASS: TestValidateMesh/MultipleWiresAllowed (0.00s)
+    --- PASS: TestValidateMesh/RejectMissingPeerPath (0.00s)
+    --- PASS: TestValidateMesh/RejectOneWayPeerPath (0.00s)
+=== RUN   TestValidateRing
+=== RUN   TestValidateRing/TwoRankSymmetricAdjacent
+=== RUN   TestValidateRing/ThreeRankAdjacentOnly
+=== RUN   TestValidateRing/MultipleWiresPerNeighbor
+=== RUN   TestValidateRing/RejectMissingForwardLink
+=== RUN   TestValidateRing/RejectMissingBackwardLink
+=== RUN   TestValidateRing/RejectOnlyNonAdjacentLinks
+--- PASS: TestValidateRing (0.00s)
+    --- PASS: TestValidateRing/TwoRankSymmetricAdjacent (0.00s)
+    --- PASS: TestValidateRing/ThreeRankAdjacentOnly (0.00s)
+    --- PASS: TestValidateRing/MultipleWiresPerNeighbor (0.00s)
+    --- PASS: TestValidateRing/RejectMissingForwardLink (0.00s)
+    --- PASS: TestValidateRing/RejectMissingBackwardLink (0.00s)
+    --- PASS: TestValidateRing/RejectOnlyNonAdjacentLinks (0.00s)
+=== RUN   TestChoose
+=== RUN   TestChoose/PreferRingWhenBothValid
+=== RUN   TestChoose/MeshWhenRingInvalid
+=== RUN   TestChoose/RingWhenOnlyRingValid
+=== RUN   TestChoose/ErrorWhenNeitherValid
+=== RUN   TestChoose/StableChoiceAcrossRanks
+--- PASS: TestChoose (0.00s)
+    --- PASS: TestChoose/PreferRingWhenBothValid (0.00s)
+    --- PASS: TestChoose/MeshWhenRingInvalid (0.00s)
+    --- PASS: TestChoose/RingWhenOnlyRingValid (0.00s)
+    --- PASS: TestChoose/ErrorWhenNeitherValid (0.00s)
+    --- PASS: TestChoose/StableChoiceAcrossRanks (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/topology	0.020s
+
+== gojaccl/internal/reduce ==
+
+=== RUN   TestDTypeForElement
+=== RUN   TestDTypeForElement/Bool
+=== RUN   TestDTypeForElement/Int8
+=== RUN   TestDTypeForElement/Int16
+=== RUN   TestDTypeForElement/Int32
+=== RUN   TestDTypeForElement/Int64
+=== RUN   TestDTypeForElement/Uint8
+=== RUN   TestDTypeForElement/Uint16
+=== RUN   TestDTypeForElement/Uint32
+=== RUN   TestDTypeForElement/Uint64
+=== RUN   TestDTypeForElement/Float32
+=== RUN   TestDTypeForElement/Float64
+=== RUN   TestDTypeForElement/Complex64
+--- PASS: TestDTypeForElement (0.00s)
+    --- PASS: TestDTypeForElement/Bool (0.00s)
+    --- PASS: TestDTypeForElement/Int8 (0.00s)
+    --- PASS: TestDTypeForElement/Int16 (0.00s)
+    --- PASS: TestDTypeForElement/Int32 (0.00s)
+    --- PASS: TestDTypeForElement/Int64 (0.00s)
+    --- PASS: TestDTypeForElement/Uint8 (0.00s)
+    --- PASS: TestDTypeForElement/Uint16 (0.00s)
+    --- PASS: TestDTypeForElement/Uint32 (0.00s)
+    --- PASS: TestDTypeForElement/Uint64 (0.00s)
+    --- PASS: TestDTypeForElement/Float32 (0.00s)
+    --- PASS: TestDTypeForElement/Float64 (0.00s)
+    --- PASS: TestDTypeForElement/Complex64 (0.00s)
+=== RUN   TestDTypeForElementHalfTypesDeferred
+=== RUN   TestDTypeForElementHalfTypesDeferred/Float16
+=== RUN   TestDTypeForElementHalfTypesDeferred/BFloat16
+--- PASS: TestDTypeForElementHalfTypesDeferred (0.00s)
+    --- PASS: TestDTypeForElementHalfTypesDeferred/Float16 (0.00s)
+    --- PASS: TestDTypeForElementHalfTypesDeferred/BFloat16 (0.00s)
+=== RUN   TestSumKernel
+=== RUN   TestSumKernel/BoolMatchesCXX
+=== RUN   TestSumKernel/Integer
+=== RUN   TestSumKernel/UnsignedInteger
+=== RUN   TestSumKernel/Float32
+=== RUN   TestSumKernel/Float64
+=== RUN   TestSumKernel/Complex64
+=== RUN   TestSumKernel/InPlace
+--- PASS: TestSumKernel (0.00s)
+    --- PASS: TestSumKernel/BoolMatchesCXX (0.00s)
+    --- PASS: TestSumKernel/Integer (0.00s)
+    --- PASS: TestSumKernel/UnsignedInteger (0.00s)
+    --- PASS: TestSumKernel/Float32 (0.00s)
+    --- PASS: TestSumKernel/Float64 (0.00s)
+    --- PASS: TestSumKernel/Complex64 (0.00s)
+    --- PASS: TestSumKernel/InPlace (0.00s)
+=== RUN   TestMaxKernel
+=== RUN   TestMaxKernel/BoolMatchesCXX
+=== RUN   TestMaxKernel/Integer
+=== RUN   TestMaxKernel/UnsignedInteger
+=== RUN   TestMaxKernel/Float32
+=== RUN   TestMaxKernel/Float64
+=== RUN   TestMaxKernel/Complex64Lexicographic
+=== RUN   TestMaxKernel/InPlace
+--- PASS: TestMaxKernel (0.00s)
+    --- PASS: TestMaxKernel/BoolMatchesCXX (0.00s)
+    --- PASS: TestMaxKernel/Integer (0.00s)
+    --- PASS: TestMaxKernel/UnsignedInteger (0.00s)
+    --- PASS: TestMaxKernel/Float32 (0.00s)
+    --- PASS: TestMaxKernel/Float64 (0.00s)
+    --- PASS: TestMaxKernel/Complex64Lexicographic (0.00s)
+    --- PASS: TestMaxKernel/InPlace (0.00s)
+=== RUN   TestMinKernel
+=== RUN   TestMinKernel/BoolMatchesCXX
+=== RUN   TestMinKernel/Integer
+=== RUN   TestMinKernel/UnsignedInteger
+=== RUN   TestMinKernel/Float32
+=== RUN   TestMinKernel/Float64
+=== RUN   TestMinKernel/Complex64Lexicographic
+=== RUN   TestMinKernel/InPlace
+--- PASS: TestMinKernel (0.00s)
+    --- PASS: TestMinKernel/BoolMatchesCXX (0.00s)
+    --- PASS: TestMinKernel/Integer (0.00s)
+    --- PASS: TestMinKernel/UnsignedInteger (0.00s)
+    --- PASS: TestMinKernel/Float32 (0.00s)
+    --- PASS: TestMinKernel/Float64 (0.00s)
+    --- PASS: TestMinKernel/Complex64Lexicographic (0.00s)
+    --- PASS: TestMinKernel/InPlace (0.00s)
+=== RUN   TestKernelRejectsBadLengths
+=== RUN   TestKernelRejectsBadLengths/ByteCountNotMultipleOfElementSize
+=== RUN   TestKernelRejectsBadLengths/OutputShorterThanInput
+--- PASS: TestKernelRejectsBadLengths (0.00s)
+    --- PASS: TestKernelRejectsBadLengths/ByteCountNotMultipleOfElementSize (0.00s)
+    --- PASS: TestKernelRejectsBadLengths/OutputShorterThanInput (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/reduce	0.019s
+
+== gojaccl/internal/tcpchan ==
+
+=== RUN   TestSideChannelDial
+=== RUN   TestSideChannelDial/RankZeroListens
+=== RUN   TestSideChannelDial/NonZeroRankConnects
+=== RUN   TestSideChannelDial/ContextCancelBeforeDial
+=== RUN   TestSideChannelDial/ContextDeadlineDuringDial
+=== RUN   TestSideChannelDial/DuplicateRankRejected
+=== RUN   TestSideChannelDial/WrongPeerCountRejected
+--- PASS: TestSideChannelDial (0.02s)
+    --- PASS: TestSideChannelDial/RankZeroListens (0.00s)
+    --- PASS: TestSideChannelDial/NonZeroRankConnects (0.00s)
+    --- PASS: TestSideChannelDial/ContextCancelBeforeDial (0.00s)
+    --- PASS: TestSideChannelDial/ContextDeadlineDuringDial (0.00s)
+    --- PASS: TestSideChannelDial/DuplicateRankRejected (0.00s)
+    --- PASS: TestSideChannelDial/WrongPeerCountRejected (0.00s)
+=== RUN   TestAllGatherMetadata
+=== RUN   TestAllGatherMetadata/OneValuePerRank
+=== RUN   TestAllGatherMetadata/PreservesRankOrder
+=== RUN   TestAllGatherMetadata/RejectsOversizedMessage
+=== RUN   TestAllGatherMetadata/RejectsMalformedFrame
+--- PASS: TestAllGatherMetadata (0.02s)
+    --- PASS: TestAllGatherMetadata/OneValuePerRank (0.00s)
+    --- PASS: TestAllGatherMetadata/PreservesRankOrder (0.00s)
+    --- PASS: TestAllGatherMetadata/RejectsOversizedMessage (0.00s)
+    --- PASS: TestAllGatherMetadata/RejectsMalformedFrame (0.00s)
+=== RUN   TestBarrier
+=== RUN   TestBarrier/AllRanksArrive
+=== RUN   TestBarrier/StaggeredArrival
+=== RUN   TestBarrier/ContextCancellation
+=== RUN   TestBarrier/PeerCloseUnblocksWaiters
+--- PASS: TestBarrier (0.02s)
+    --- PASS: TestBarrier/AllRanksArrive (0.00s)
+    --- PASS: TestBarrier/StaggeredArrival (0.00s)
+    --- PASS: TestBarrier/ContextCancellation (0.00s)
+    --- PASS: TestBarrier/PeerCloseUnblocksWaiters (0.00s)
+=== RUN   TestClose
+=== RUN   TestClose/Idempotent
+=== RUN   TestClose/ClosesListenerAndConnections
+=== RUN   TestClose/UnblocksPendingRead
+--- PASS: TestClose (0.00s)
+    --- PASS: TestClose/Idempotent (0.00s)
+    --- PASS: TestClose/ClosesListenerAndConnections (0.00s)
+    --- PASS: TestClose/UnblocksPendingRead (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/tcpchan	0.074s
+
+== gojaccl/internal/rdma ==
+
+=== RUN   TestAvailable
+=== RUN   TestAvailable/MissingLibrary
+=== RUN   TestAvailable/MissingRequiredSymbol
+=== RUN   TestAvailable/AllRequiredSymbolsPresent
+--- PASS: TestAvailable (0.00s)
+    --- PASS: TestAvailable/MissingLibrary (0.00s)
+    --- PASS: TestAvailable/MissingRequiredSymbol (0.00s)
+    --- PASS: TestAvailable/AllRequiredSymbolsPresent (0.00s)
+=== RUN   TestLoader
+=== RUN   TestLoader/OpensLibraryOnce
+=== RUN   TestLoader/ResolvesIbvSymbols
+=== RUN   TestLoader/WrapsDlopenError
+=== RUN   TestLoader/WrapsSymbolError
+=== RUN   TestLoader/CloseIdempotent
+--- PASS: TestLoader (0.00s)
+    --- PASS: TestLoader/OpensLibraryOnce (0.00s)
+    --- PASS: TestLoader/ResolvesIbvSymbols (0.00s)
+    --- PASS: TestLoader/WrapsDlopenError (0.00s)
+    --- PASS: TestLoader/WrapsSymbolError (0.00s)
+    --- PASS: TestLoader/CloseIdempotent (0.00s)
+=== RUN   TestDevice
+=== RUN   TestDevice/OpenByPath
+=== RUN   TestDevice/OpenFailureIncludesDevice
+=== RUN   TestDevice/CloseReleasesContext
+--- PASS: TestDevice (0.00s)
+    --- PASS: TestDevice/OpenByPath (0.00s)
+    --- PASS: TestDevice/OpenFailureIncludesDevice (0.00s)
+    --- PASS: TestDevice/CloseReleasesContext (0.00s)
+=== RUN   TestProtectionDomain
+=== RUN   TestProtectionDomain/Alloc
+=== RUN   TestProtectionDomain/AllocFailure
+=== RUN   TestProtectionDomain/Close
+--- PASS: TestProtectionDomain (0.00s)
+    --- PASS: TestProtectionDomain/Alloc (0.00s)
+    --- PASS: TestProtectionDomain/AllocFailure (0.00s)
+    --- PASS: TestProtectionDomain/Close (0.00s)
+=== RUN   TestCompletionQueue
+=== RUN   TestCompletionQueue/Create
+=== RUN   TestCompletionQueue/CreateFailure
+=== RUN   TestCompletionQueue/Close
+--- PASS: TestCompletionQueue (0.00s)
+    --- PASS: TestCompletionQueue/Create (0.00s)
+    --- PASS: TestCompletionQueue/CreateFailure (0.00s)
+    --- PASS: TestCompletionQueue/Close (0.00s)
+=== RUN   TestQueuePair
+=== RUN   TestQueuePair/Create
+=== RUN   TestQueuePair/InitRTRRTS
+=== RUN   TestQueuePair/TransitionFailureIncludesState
+=== RUN   TestQueuePair/Close
+--- PASS: TestQueuePair (0.00s)
+    --- PASS: TestQueuePair/Create (0.00s)
+    --- PASS: TestQueuePair/InitRTRRTS (0.00s)
+    --- PASS: TestQueuePair/TransitionFailureIncludesState (0.00s)
+    --- PASS: TestQueuePair/Close (0.00s)
+=== RUN   TestMemoryRegistration
+=== RUN   TestMemoryRegistration/PageAlignedStagingBuffer
+=== RUN   TestMemoryRegistration/Register
+=== RUN   TestMemoryRegistration/RegisterFailure
+=== RUN   TestMemoryRegistration/DeregisterOnClose
+--- PASS: TestMemoryRegistration (0.00s)
+    --- PASS: TestMemoryRegistration/PageAlignedStagingBuffer (0.00s)
+    --- PASS: TestMemoryRegistration/Register (0.00s)
+    --- PASS: TestMemoryRegistration/RegisterFailure (0.00s)
+    --- PASS: TestMemoryRegistration/DeregisterOnClose (0.00s)
+=== RUN   TestWorkRequests
+=== RUN   TestWorkRequests/PostSend
+=== RUN   TestWorkRequests/PostRecv
+=== RUN   TestWorkRequests/PostSendFailure
+=== RUN   TestWorkRequests/PostRecvFailure
+--- PASS: TestWorkRequests (0.00s)
+    --- PASS: TestWorkRequests/PostSend (0.00s)
+    --- PASS: TestWorkRequests/PostRecv (0.00s)
+    --- PASS: TestWorkRequests/PostSendFailure (0.00s)
+    --- PASS: TestWorkRequests/PostRecvFailure (0.00s)
+=== RUN   TestPollCompletion
+=== RUN   TestPollCompletion/ReturnsCompletion
+=== RUN   TestPollCompletion/ContextCancellation
+=== RUN   TestPollCompletion/HybridBackoffYields
+=== RUN   TestPollCompletion/WorkCompletionErrorIncludesOpcode
+=== RUN   TestPollCompletion/PollErrorIncludesCQ
+--- PASS: TestPollCompletion (0.01s)
+    --- PASS: TestPollCompletion/ReturnsCompletion (0.00s)
+    --- PASS: TestPollCompletion/ContextCancellation (0.00s)
+    --- PASS: TestPollCompletion/HybridBackoffYields (0.00s)
+    --- PASS: TestPollCompletion/WorkCompletionErrorIncludesOpcode (0.00s)
+    --- PASS: TestPollCompletion/PollErrorIncludesCQ (0.00s)
+=== RUN   TestPureGoBoundary
+=== RUN   TestPureGoBoundary/BuildsWithCGODisabled
+=== RUN   TestPureGoBoundary/DoesNotImportC
+=== RUN   TestPureGoBoundary/UsesAppleRDMABindingsBehindInternalBoundary
+--- PASS: TestPureGoBoundary (0.06s)
+    --- PASS: TestPureGoBoundary/BuildsWithCGODisabled (0.05s)
+    --- PASS: TestPureGoBoundary/DoesNotImportC (0.00s)
+    --- PASS: TestPureGoBoundary/UsesAppleRDMABindingsBehindInternalBoundary (0.00s)
+PASS
+ok  	<module>/gojaccl/internal/rdma	0.091s
+
+== Gated hardware run ==
+
+The explicit hardware gate is not complete yet. Until the multi-rank RDMA
+transport runner is implemented, enabling JACCL_TEST_RDMA should fail clearly
+rather than reporting a false pass:
+
+$ JACCL_TEST_RDMA=1 go test -v . -run '^TestIntegration'
+
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum
+    integration_test.go:17: RDMA two-rank integration runner is not implemented
+--- FAIL: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
+=== RUN   TestIntegrationTwoRankAllMax
+    integration_test.go:22: RDMA two-rank AllMax integration runner is not implemented
+--- FAIL: TestIntegrationTwoRankAllMax (0.00s)
+=== RUN   TestIntegrationTwoRankAllMin
+    integration_test.go:27: RDMA two-rank AllMin integration runner is not implemented
+--- FAIL: TestIntegrationTwoRankAllMin (0.00s)
+=== RUN   TestIntegrationTwoRankAllGather
+    integration_test.go:32: RDMA two-rank AllGather integration runner is not implemented
+--- FAIL: TestIntegrationTwoRankAllGather (0.00s)
+=== RUN   TestIntegrationTwoRankSendRecv
+    integration_test.go:37: RDMA two-rank Send/Recv integration runner is not implemented
+--- FAIL: TestIntegrationTwoRankSendRecv (0.00s)
+=== RUN   TestIntegrationPeerFailure
+    integration_test.go:42: RDMA peer-failure integration runner is not implemented
+--- FAIL: TestIntegrationPeerFailure (0.00s)
+=== RUN   TestIntegrationRingPreferredWhenValid
+    integration_test.go:47: RDMA ring integration runner is not implemented
+--- FAIL: TestIntegrationRingPreferredWhenValid (0.00s)
+=== RUN   TestIntegrationMeshFallbackWhenRingInvalid
+    integration_test.go:52: RDMA mesh integration runner is not implemented
+--- FAIL: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
+FAIL
+exit status 1
+FAIL	github.com/tmc/gojaccl	0.241s
+
+Target output once the hardware runner exists:
+
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum/StaggeredBarrier
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum/PostBarrierAllSumInt32
+--- PASS: TestIntegrationTwoRankBarrierAndAllSum
+...
+PASS
+ok  	github.com/tmc/gojaccl	2.081s
+
+== Benchmark cases to add outside `go test -v` ==
+
+$ go test -run '^$' -bench . ./gojaccl
+
+BenchmarkAllSumFloat32/2Ranks/1KiB
+BenchmarkAllSumFloat32/2Ranks/64KiB
+BenchmarkAllSumFloat32/2Ranks/1MiB
+BenchmarkAllSumFloat32/2Ranks/InPlace
+BenchmarkAllGatherFloat32/2Ranks/1KiB
+BenchmarkBarrier/2Ranks
+
+Float16 and BFloat16 benchmark cases are intentionally absent until those types
+exist in the public API and have parity tests against the C++ JACCL semantics.
