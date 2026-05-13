@@ -440,7 +440,7 @@ func PostWrite(qp *QueuePair, mr *MemoryRegion, offset, length int, remoteAddr u
 		WRID:      id,
 		SGList:    &sge,
 		NumSGE:    1,
-		Opcode:    ibvWRRDMAWrite,
+		Opcode:    applerdma.IBV_WR_RDMA_WRITE,
 		SendFlags: applerdma.IBV_SEND_SIGNALED,
 	}
 	binary.LittleEndian.PutUint64(wr.WR[0:8], remoteAddr)
@@ -497,8 +497,6 @@ func post(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64, send b
 	}
 	return nil
 }
-
-const ibvWRRDMAWrite = 0
 
 func PollCompletion(ctx context.Context, cq *CompletionQueue) ([]WorkRequest, error) {
 	if err := ctx.Err(); err != nil {

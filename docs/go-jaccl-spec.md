@@ -254,7 +254,3 @@ reserves one byte in the registered slab, publishes that address and rkey with
 its queue-pair destination metadata, and writes one byte to each idle peer route
 at the heartbeat interval. Do not replace this with SEND-based heartbeats; a
 SEND heartbeat can consume a user receive on the raw data queue pair.
-
-Follow-up: move the `IBV_WR_RDMA_WRITE` opcode constant into the generated
-`github.com/tmc/apple/rdma` binding surface. The internal wrapper uses the
-libibverbs opcode value until the generator emits the symbol.
