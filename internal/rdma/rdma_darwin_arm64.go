@@ -1,0 +1,528 @@
+//go:build darwin && arm64
+
+package rdma
+
+import (
+	"context"
+	"fmt"
+	"runtime"
+	"syscall"
+	"time"
+	"unsafe"
+
+	applerdma "github.com/tmc/apple/rdma"
+)
+
+func Available() bool {
+	return applerdma.Available()
+}
+
+func DeviceNames() ([]string, error) {
+	if !Available() {
+		return nil, ErrUnavailable
+	}
+	devices, err := applerdma.Devices()
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	names := make([]string, 0, len(devices))
+	for _, dev := range devices {
+		names = append(names, dev.Name)
+	}
+	return names, nil
+}
+
+func OpenDevice(path string) (*Device, error) {
+	if !Available() {
+		return nil, ErrUnavailable
+	}
+	devices, err := applerdma.Devices()
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	for _, dev := range devices {
+		if path != "" && dev.Name != path {
+			continue
+		}
+		ctx, err := applerdma.Ibv_open_device(dev.Handle)
+		if err != nil {
+			return nil, fmt.Errorf("open device %q: %w", dev.Name, err)
+		}
+		if ctx == 0 {
+			return nil, fmt.Errorf("open device %q: returned nil context", dev.Name)
+		}
+		return &Device{handle: uintptr(ctx), name: dev.Name}, nil
+	}
+	if path == "" {
+		return nil, fmt.Errorf("open device: no RDMA devices")
+	}
+	return nil, fmt.Errorf("open device %q: not found", path)
+}
+
+func (d *Device) Close() error {
+	if d == nil || d.handle == 0 {
+		return nil
+	}
+	var err error
+	d.once.Do(func() {
+		rc, e := applerdma.Ibv_close_device(applerdma.RDMAContext(d.handle))
+		if e != nil {
+			err = fmt.Errorf("close device %q: %w", d.name, e)
+			return
+		}
+		if rc != 0 {
+			err = fmt.Errorf("close device %q: errno %d", d.name, rc)
+			return
+		}
+		d.handle = 0
+	})
+	return err
+}
+
+func NewProtectionDomain(dev *Device) (*ProtectionDomain, error) {
+	if dev == nil || dev.handle == 0 {
+		return nil, fmt.Errorf("alloc protection domain: nil device")
+	}
+	pd, err := applerdma.Ibv_alloc_pd(applerdma.RDMAContext(dev.handle))
+	if err != nil {
+		return nil, fmt.Errorf("alloc protection domain: %w", err)
+	}
+	if pd == 0 {
+		return nil, fmt.Errorf("alloc protection domain: returned nil handle")
+	}
+	return &ProtectionDomain{dev: dev, handle: uintptr(pd)}, nil
+}
+
+func (p *ProtectionDomain) Close() error {
+	if p == nil || p.handle == 0 {
+		return nil
+	}
+	var err error
+	p.once.Do(func() {
+		rc, e := applerdma.Ibv_dealloc_pd(applerdma.RDMAPD(p.handle))
+		if e != nil {
+			err = fmt.Errorf("dealloc protection domain: %w", e)
+			return
+		}
+		if rc != 0 {
+			err = fmt.Errorf("dealloc protection domain: errno %d", rc)
+			return
+		}
+		p.handle = 0
+	})
+	return err
+}
+
+func NewCompletionQueue(dev *Device, capacity int) (*CompletionQueue, error) {
+	if dev == nil || dev.handle == 0 {
+		return nil, fmt.Errorf("create completion queue: nil device")
+	}
+	if capacity <= 0 {
+		return nil, fmt.Errorf("create completion queue: capacity %d must be positive", capacity)
+	}
+	cq, err := applerdma.Ibv_create_cq(applerdma.RDMAContext(dev.handle), capacity, 0, 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("create completion queue: %w", err)
+	}
+	if cq == 0 {
+		return nil, fmt.Errorf("create completion queue: returned nil handle")
+	}
+	return &CompletionQueue{dev: dev, handle: uintptr(cq)}, nil
+}
+
+func (c *CompletionQueue) Close() error {
+	if c == nil || c.handle == 0 {
+		return nil
+	}
+	var err error
+	c.once.Do(func() {
+		rc, e := applerdma.Ibv_destroy_cq(applerdma.RDMACQ(c.handle))
+		if e != nil {
+			err = fmt.Errorf("destroy completion queue: %w", e)
+			return
+		}
+		if rc != 0 {
+			err = fmt.Errorf("destroy completion queue: errno %d", rc)
+			return
+		}
+		c.handle = 0
+	})
+	return err
+}
+
+func NewQueuePair(pd *ProtectionDomain, cq *CompletionQueue) (*QueuePair, error) {
+	if pd == nil || pd.handle == 0 {
+		return nil, fmt.Errorf("create queue pair: nil protection domain")
+	}
+	if cq == nil || cq.handle == 0 {
+		return nil, fmt.Errorf("create queue pair: nil completion queue")
+	}
+	attr := applerdma.IbvQPInitAttr{
+		SendCQ: applerdma.RDMACQ(cq.handle),
+		RecvCQ: applerdma.RDMACQ(cq.handle),
+		Cap: applerdma.IbvQPCap{
+			MaxSendWR:  64,
+			MaxRecvWR:  64,
+			MaxSendSGE: 1,
+			MaxRecvSGE: 1,
+		},
+		QPType:   applerdma.IBV_QPT_UC,
+		SQSigAll: 1,
+	}
+	qp, err := applerdma.Ibv_create_qp(applerdma.RDMAPD(pd.handle), uintptr(unsafe.Pointer(&attr)))
+	if err != nil {
+		return nil, fmt.Errorf("create queue pair: %w", err)
+	}
+	if qp == 0 {
+		return nil, fmt.Errorf("create queue pair: returned nil handle")
+	}
+	poster, err := applerdma.NewIbvQPPoster(qp)
+	if err != nil {
+		_, _ = applerdma.Ibv_destroy_qp(qp)
+		return nil, fmt.Errorf("create queue pair poster: %w", err)
+	}
+	return &QueuePair{pd: pd, cq: cq, handle: uintptr(qp), poster: poster}, nil
+}
+
+func (q *QueuePair) Close() error {
+	if q == nil || q.handle == 0 {
+		return nil
+	}
+	var err error
+	q.once.Do(func() {
+		rc, e := applerdma.Ibv_destroy_qp(applerdma.RDMAQP(q.handle))
+		if e != nil {
+			err = fmt.Errorf("destroy queue pair: %w", e)
+			return
+		}
+		if rc != 0 {
+			err = fmt.Errorf("destroy queue pair: errno %d", rc)
+			return
+		}
+		q.handle = 0
+	})
+	return err
+}
+
+func (q *QueuePair) number() uint32 {
+	if q == nil || q.handle == 0 {
+		return 0
+	}
+	return applerdma.Ibv_qp_num(applerdma.RDMAQP(q.handle))
+}
+
+func LocalDestination(qp *QueuePair) (Destination, error) {
+	if qp == nil || qp.handle == 0 || qp.pd == nil || qp.pd.dev == nil {
+		return Destination{}, fmt.Errorf("local destination: nil queue pair")
+	}
+	ctx := applerdma.RDMAContext(qp.pd.dev.handle)
+	var port applerdma.IbvPortAttr
+	if rc, err := applerdma.Ibv_query_port(ctx, 1, uintptr(unsafe.Pointer(&port))); err != nil {
+		return Destination{}, fmt.Errorf("query port: %w", err)
+	} else if rc != 0 {
+		return Destination{}, fmt.Errorf("query port: errno %d", rc)
+	}
+
+	var gid applerdma.IbvGID
+	gidIndex := 0
+	for i := 0; i < int(port.GIDTblLen); i++ {
+		var candidate applerdma.IbvGID
+		rc, err := applerdma.Ibv_query_gid(ctx, 1, i, uintptr(unsafe.Pointer(&candidate)))
+		if err != nil || rc != 0 {
+			continue
+		}
+		if isIPv4MappedGID(candidate) {
+			gid = candidate
+			gidIndex = i
+			break
+		}
+		if gid == ([16]byte{}) {
+			gid = candidate
+			gidIndex = i
+		}
+	}
+	return Destination{
+		LID:      port.LID,
+		QPN:      qp.Number(),
+		PSN:      7,
+		GIDIndex: gidIndex,
+		GID:      [16]byte(gid),
+	}, nil
+}
+
+func InitQueuePair(qp *QueuePair) error {
+	if qp == nil || qp.handle == 0 {
+		return fmt.Errorf("change queue pair to INIT: nil queue pair")
+	}
+	attr := applerdma.IbvQPAttr{
+		QPState:       applerdma.IBV_QPS_INIT,
+		PortNum:       1,
+		PKeyIndex:     0,
+		QPAccessFlags: applerdma.IBV_ACCESS_LOCAL_WRITE | applerdma.IBV_ACCESS_REMOTE_READ | applerdma.IBV_ACCESS_REMOTE_WRITE,
+	}
+	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_PKEY_INDEX | applerdma.IBV_QP_PORT | applerdma.IBV_QP_ACCESS_FLAGS
+	return modifyQueuePair(qp, &attr, mask, "INIT")
+}
+
+func ReadyToReceive(qp *QueuePair, dst Destination) error {
+	if qp == nil || qp.handle == 0 {
+		return fmt.Errorf("change queue pair to RTR: nil queue pair")
+	}
+	attr := applerdma.IbvQPAttr{
+		QPState:   applerdma.IBV_QPS_RTR,
+		PathMTU:   applerdma.IBV_MTU_1024,
+		RQPSN:     dst.PSN,
+		DestQPNum: dst.QPN,
+		AHAttr: applerdma.IbvAHAttr{
+			DLID:    dst.LID,
+			PortNum: 1,
+		},
+	}
+	if dst.GID != ([16]byte{}) {
+		attr.AHAttr.IsGlobal = 1
+		attr.AHAttr.GRH.HopLimit = 1
+		attr.AHAttr.GRH.DGID = applerdma.IbvGID(dst.GID)
+		attr.AHAttr.GRH.SGIDIndex = 1
+	}
+	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_AV | applerdma.IBV_QP_PATH_MTU | applerdma.IBV_QP_DEST_QPN | applerdma.IBV_QP_RQ_PSN
+	return modifyQueuePair(qp, &attr, mask, "RTR")
+}
+
+func ReadyToSend(qp *QueuePair, psn uint32) error {
+	if qp == nil || qp.handle == 0 {
+		return fmt.Errorf("change queue pair to RTS: nil queue pair")
+	}
+	attr := applerdma.IbvQPAttr{
+		QPState: applerdma.IBV_QPS_RTS,
+		SQPSN:   psn,
+	}
+	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_SQ_PSN
+	return modifyQueuePair(qp, &attr, mask, "RTS")
+}
+
+func modifyQueuePair(qp *QueuePair, attr *applerdma.IbvQPAttr, mask int, state string) error {
+	rc, err := applerdma.Ibv_modify_qp(applerdma.RDMAQP(qp.handle), uintptr(unsafe.Pointer(attr)), mask)
+	if err != nil {
+		return fmt.Errorf("change queue pair to %s: %w", state, err)
+	}
+	if rc != 0 {
+		return fmt.Errorf("change queue pair to %s: errno %d", state, rc)
+	}
+	return nil
+}
+
+func isIPv4MappedGID(gid applerdma.IbvGID) bool {
+	for i := 0; i < 10; i++ {
+		if gid[i] != 0 {
+			return false
+		}
+	}
+	return gid[10] == 0xff && gid[11] == 0xff
+}
+
+func RegisterMemory(pd *ProtectionDomain, buf []byte) (*MemoryRegion, error) {
+	if pd == nil || pd.handle == 0 {
+		return nil, fmt.Errorf("register memory: nil protection domain")
+	}
+	if len(buf) == 0 {
+		return nil, fmt.Errorf("register memory: empty buffer")
+	}
+	aligned := pageAligned(buf)
+	mr, err := applerdma.Ibv_reg_mr(applerdma.RDMAPD(pd.handle), uintptr(unsafe.Pointer(&aligned[0])), uintptr(len(aligned)), applerdma.IBV_ACCESS_LOCAL_WRITE|applerdma.IBV_ACCESS_REMOTE_WRITE|applerdma.IBV_ACCESS_REMOTE_READ)
+	if err != nil {
+		return nil, fmt.Errorf("register memory: %w", err)
+	}
+	if mr == 0 {
+		return nil, fmt.Errorf("register memory: returned nil handle")
+	}
+	return &MemoryRegion{
+		pd:     pd,
+		handle: uintptr(mr),
+		buf:    aligned,
+		lkey:   applerdma.Ibv_mr_lkey(mr),
+		rkey:   applerdma.Ibv_mr_rkey(mr),
+	}, nil
+}
+
+func NewMemoryRegion(pd *ProtectionDomain, size int) (*MemoryRegion, error) {
+	if pd == nil || pd.handle == 0 {
+		return nil, fmt.Errorf("alloc memory region: nil protection domain")
+	}
+	if size <= 0 {
+		return nil, fmt.Errorf("alloc memory region: size %d must be positive", size)
+	}
+	buf, err := syscall.Mmap(-1, 0, roundPage(size), syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
+	if err != nil {
+		return nil, fmt.Errorf("alloc memory region: mmap: %w", err)
+	}
+	mr, err := registerMappedMemory(pd, buf)
+	if err != nil {
+		_ = syscall.Munmap(buf)
+		return nil, err
+	}
+	mr.mapped = true
+	return mr, nil
+}
+
+func registerMappedMemory(pd *ProtectionDomain, buf []byte) (*MemoryRegion, error) {
+	mr, err := applerdma.Ibv_reg_mr(applerdma.RDMAPD(pd.handle), uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)), applerdma.IBV_ACCESS_LOCAL_WRITE|applerdma.IBV_ACCESS_REMOTE_WRITE|applerdma.IBV_ACCESS_REMOTE_READ)
+	if err != nil {
+		return nil, fmt.Errorf("register memory: %w", err)
+	}
+	if mr == 0 {
+		return nil, fmt.Errorf("register memory: returned nil handle")
+	}
+	return &MemoryRegion{
+		pd:     pd,
+		handle: uintptr(mr),
+		buf:    buf,
+		lkey:   applerdma.Ibv_mr_lkey(mr),
+		rkey:   applerdma.Ibv_mr_rkey(mr),
+	}, nil
+}
+
+func (m *MemoryRegion) Close() error {
+	if m == nil || m.handle == 0 {
+		return nil
+	}
+	var err error
+	m.once.Do(func() {
+		rc, e := applerdma.Ibv_dereg_mr(applerdma.RDMAMR(m.handle))
+		if e != nil {
+			err = fmt.Errorf("dereg memory: %w", e)
+			return
+		}
+		if rc != 0 {
+			err = fmt.Errorf("dereg memory: errno %d", rc)
+			return
+		}
+		if m.mapped {
+			if e := syscall.Munmap(m.buf); e != nil && err == nil {
+				err = fmt.Errorf("unmap memory: %w", e)
+				return
+			}
+		}
+		m.handle = 0
+		m.buf = nil
+	})
+	return err
+}
+
+func PostSend(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64) error {
+	return post(qp, mr, offset, length, id, true)
+}
+
+func PostRecv(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64) error {
+	return post(qp, mr, offset, length, id, false)
+}
+
+func post(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64, send bool) error {
+	if qp == nil || qp.handle == 0 {
+		return fmt.Errorf("post work request: nil queue pair")
+	}
+	if mr == nil || mr.handle == 0 {
+		return fmt.Errorf("post work request: nil memory region")
+	}
+	if offset < 0 || length < 0 || offset+length > len(mr.buf) {
+		return fmt.Errorf("post work request: range [%d,%d) outside buffer length %d", offset, offset+length, len(mr.buf))
+	}
+	if length == 0 {
+		return nil
+	}
+	sge := applerdma.IbvSGE{
+		Addr:   uint64(uintptr(unsafe.Pointer(&mr.buf[offset]))),
+		Length: uint32(length),
+		LKey:   mr.lkey,
+	}
+	poster := qp.poster.(applerdma.IbvQPPoster)
+	if send {
+		wr := applerdma.IbvSendWR{
+			WRID:      id,
+			SGList:    &sge,
+			NumSGE:    1,
+			Opcode:    applerdma.IBV_WR_SEND,
+			SendFlags: applerdma.IBV_SEND_SIGNALED,
+		}
+		var bad *applerdma.IbvSendWR
+		if rc := poster.PostSend(&wr, &bad); rc != 0 {
+			return fmt.Errorf("post send: errno %d", rc)
+		}
+		return nil
+	}
+	wr := applerdma.IbvRecvWR{
+		WRID:   id,
+		SGList: &sge,
+		NumSGE: 1,
+	}
+	var bad *applerdma.IbvRecvWR
+	if rc := poster.PostRecv(&wr, &bad); rc != 0 {
+		return fmt.Errorf("post recv: errno %d", rc)
+	}
+	return nil
+}
+
+func PollCompletion(ctx context.Context, cq *CompletionQueue) ([]WorkRequest, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if cq == nil || cq.handle == 0 {
+		return nil, fmt.Errorf("poll completion queue: nil completion queue")
+	}
+	var wc applerdma.IbvWC
+	spins := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		n, err := applerdma.Ibv_poll_cq(applerdma.RDMACQ(cq.handle), 1, &wc)
+		if err != nil {
+			return nil, fmt.Errorf("poll completion queue: %w", err)
+		}
+		if n < 0 {
+			return nil, fmt.Errorf("poll completion queue: errno %d", n)
+		}
+		if n > 0 {
+			if wc.Status != applerdma.IBV_WC_SUCCESS {
+				return nil, fmt.Errorf("work completion opcode %d status %d", wc.Opcode, wc.Status)
+			}
+			return []WorkRequest{{
+				ID:     wc.WRID,
+				Opcode: int(wc.Opcode),
+				Bytes:  int(wc.ByteLen),
+				Status: int(wc.Status),
+			}}, nil
+		}
+		spins++
+		if spins < 64 {
+			runtime.Gosched()
+			continue
+		}
+		time.Sleep(50 * time.Microsecond)
+	}
+}
+
+func pageAligned(buf []byte) []byte {
+	page := uintptr(osPageSize())
+	addr := uintptr(unsafe.Pointer(&buf[0]))
+	if addr%page == 0 {
+		return buf
+	}
+	raw := make([]byte, len(buf)+int(page)-1)
+	base := uintptr(unsafe.Pointer(&raw[0]))
+	off := int((page - base%page) % page)
+	aligned := raw[off : off+len(buf)]
+	copy(aligned, buf)
+	return aligned
+}
+
+func osPageSize() int {
+	return 16 * 1024
+}
+
+func roundPage(n int) int {
+	page := osPageSize()
+	if n%page == 0 {
+		return n
+	}
+	return n + page - n%page
+}
