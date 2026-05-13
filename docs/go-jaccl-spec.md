@@ -52,7 +52,8 @@ payloads between ranks.
 
 The public package should not require cgo. Any Apple RDMA binding, dynamic
 library loading, or generated ABI surface belongs behind build tags and internal
-packages. A first implementation can be `darwin && arm64` only.
+packages. The current RDMA backend is `darwin && arm64`; other platforms return
+`rdma unavailable` from the internal backend.
 
 ## Package Shape
 
@@ -229,13 +230,14 @@ Float16 and bfloat16 need a compatibility decision. The C++ code has custom
 fallback types and runtime bfloat16 feature detection; Go needs explicit types
 and tests before those can be treated as first-class reductions.
 
-## First Implementation Slice
+## Implemented Surface
 
-1. Add the public package skeleton with `Config`, topology validation,
-   `ConfigFromEnv`, error definitions, and no RDMA calls.
-2. Add a fake in-memory backend for unit tests of lifecycle and API contracts.
-3. Add a `darwin && arm64` `internal/rdma` wrapper over the existing purego
-   `github.com/tmc/apple/rdma` bindings.
-4. Implement `Barrier`, `Send`, `Recv`, `AllGather[T]`, and `AllSum[float32]`.
-5. Add two-process integration tests gated by explicit environment variables.
-6. Add benchmark parity against the current C++ `allreduce_bench.cpp`.
+The Go module includes the public `jaccl` package, internal topology/reduce/TCP
+side-channel packages, and a `darwin && arm64` purego RDMA wrapper over
+`github.com/tmc/apple/rdma`.
+
+The backend initializes RDMA devices, completion queues, queue pairs, persistent
+staging memory, and the TCP side channel. Mesh collectives exchange directly
+with connected peers. Ring collectives rotate payloads over adjacent links and
+reduce locally. Hardware integration tests are present but require explicit
+operator opt-in before driving the macOS RTR transition.

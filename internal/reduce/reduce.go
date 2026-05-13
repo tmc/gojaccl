@@ -66,7 +66,7 @@ func apply(dt DType, dst, src []byte, op op) error {
 	case Complex64:
 		return applyComplex64(bytesAs[complex64](dst, len(src)), bytesAs[complex64](src, len(src)), op)
 	case Float16, BFloat16:
-		return fmt.Errorf("reduce: %s is not implemented", dt)
+		return fmt.Errorf("reduce: %s is unsupported", dt)
 	default:
 		return fmt.Errorf("reduce: unsupported dtype %v", dt)
 	}

@@ -77,9 +77,6 @@ func newRDMABackend(ctx context.Context, cfg Config) (backend, error) {
 	if err != nil {
 		return nil, err
 	}
-	if topo == topology.Ring && len(cfg.Devices) > 2 {
-		return nil, fmt.Errorf("rdma ring transport with more than two ranks: %w", ErrNotImplemented)
-	}
 
 	b := &rdmaBackend{
 		rank:  cfg.Rank,
@@ -251,6 +248,9 @@ func (b *rdmaBackend) allReduce(ctx context.Context, op reductionOp, dt reduce.D
 	if len(src) == 0 {
 		return nil
 	}
+	if b.topo == topology.Ring && b.size > 2 {
+		return b.ringAllReduce(ctx, op, dt, dst, src)
+	}
 	recvs, err := b.exchange(ctx, src)
 	if err != nil {
 		return err
@@ -271,6 +271,9 @@ func (b *rdmaBackend) allGather(ctx context.Context, elemSize int, dst, src []by
 	if len(src) == 0 {
 		return nil
 	}
+	if b.topo == topology.Ring && b.size > 2 {
+		return b.ringAllGather(ctx, dst, src)
+	}
 	recvs, err := b.exchange(ctx, src)
 	if err != nil {
 		return err
@@ -283,6 +286,77 @@ func (b *rdmaBackend) allGather(ctx context.Context, elemSize int, dst, src []by
 		copy(dst[peer*len(src):(peer+1)*len(src)], recvs[peer])
 	}
 	return nil
+}
+
+func (b *rdmaBackend) ringAllReduce(ctx context.Context, op reductionOp, dt reduce.DType, dst, src []byte) error {
+	values, err := b.ringGather(ctx, src)
+	if err != nil {
+		return err
+	}
+	copy(dst, src)
+	for peer := 0; peer < b.size; peer++ {
+		if peer == b.rank {
+			continue
+		}
+		if err := applyReduction(op, dt, dst, values[peer]); err != nil {
+			return fmt.Errorf("reduce rank %d: %w", peer, err)
+		}
+	}
+	return nil
+}
+
+func (b *rdmaBackend) ringAllGather(ctx context.Context, dst, src []byte) error {
+	values, err := b.ringGather(ctx, src)
+	if err != nil {
+		return err
+	}
+	for peer, value := range values {
+		copy(dst[peer*len(src):(peer+1)*len(src)], value)
+	}
+	return nil
+}
+
+func (b *rdmaBackend) ringGather(ctx context.Context, src []byte) ([][]byte, error) {
+	left := (b.rank - 1 + b.size) % b.size
+	right := (b.rank + 1) % b.size
+	recvConn, err := b.conn(left)
+	if err != nil {
+		return nil, err
+	}
+	sendConn, err := b.conn(right)
+	if err != nil {
+		return nil, err
+	}
+	locked := lockConns(recvConn, sendConn)
+	defer unlockConns(locked)
+
+	values := make([][]byte, b.size)
+	values[b.rank] = append([]byte(nil), src...)
+	send := append([]byte(nil), src...)
+	for step := 0; step < b.size-1; step++ {
+		recvRank := mod(b.rank-step-1, b.size)
+		recv := make([]byte, len(src))
+		for off := 0; off < len(src); off += rdmaStagingBytes {
+			n := min(rdmaStagingBytes, len(src)-off)
+			if err := rdma.PostRecv(recvConn.qp, recvConn.recvMR, 0, n, workID(2, left)); err != nil {
+				return nil, fmt.Errorf("rank %d post recv: %w", left, err)
+			}
+			copy(sendConn.sendMR.Buffer()[:n], send[off:off+n])
+			if err := rdma.PostSend(sendConn.qp, sendConn.sendMR, 0, n, workID(1, right)); err != nil {
+				return nil, fmt.Errorf("rank %d post send: %w", right, err)
+			}
+			if err := b.poll(ctx, sendConn, 1); err != nil {
+				return nil, fmt.Errorf("rank %d send poll: %w", right, err)
+			}
+			if err := b.poll(ctx, recvConn, 1); err != nil {
+				return nil, fmt.Errorf("rank %d recv poll: %w", left, err)
+			}
+			copy(recv[off:off+n], recvConn.recvMR.Buffer()[:n])
+		}
+		values[recvRank] = recv
+		send = recv
+	}
+	return values, nil
 }
 
 func (b *rdmaBackend) exchange(ctx context.Context, src []byte) ([][]byte, error) {
@@ -328,6 +402,18 @@ func (b *rdmaBackend) exchange(ctx context.Context, src []byte) ([][]byte, error
 		}
 	}
 	return recvs, nil
+}
+
+func lockConns(conns ...*rdmaConn) []*rdmaConn {
+	locked := make([]*rdmaConn, 0, len(conns))
+	for _, conn := range conns {
+		if conn == nil || hasConn(locked, conn) {
+			continue
+		}
+		conn.mu.Lock()
+		locked = append(locked, conn)
+	}
+	return locked
 }
 
 func unlockConns(conns []*rdmaConn) {
@@ -423,4 +509,21 @@ func applyReduction(op reductionOp, dt reduce.DType, dst, src []byte) error {
 
 func workID(kind, peer int) uint64 {
 	return uint64(kind<<16 | peer)
+}
+
+func hasConn(conns []*rdmaConn, conn *rdmaConn) bool {
+	for _, c := range conns {
+		if c == conn {
+			return true
+		}
+	}
+	return false
+}
+
+func mod(x, n int) int {
+	x %= n
+	if x < 0 {
+		x += n
+	}
+	return x
 }

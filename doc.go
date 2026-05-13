@@ -35,6 +35,6 @@
 // Collectives must be called in the same order on every rank. A single Group
 // permits at most one active collective or point-to-point operation at a time.
 //
-// The first implementation target is darwin/arm64 using the purego
-// github.com/tmc/apple/rdma bindings.
+// The RDMA backend is darwin/arm64 using the purego github.com/tmc/apple/rdma
+// bindings. Other platforms report that RDMA is unavailable.
 package jaccl

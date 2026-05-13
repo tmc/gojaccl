@@ -571,49 +571,40 @@ ok  	<module>/gojaccl/internal/rdma	0.091s
 
 == Gated hardware run ==
 
-The explicit hardware gate is not complete yet. Until the multi-rank RDMA
-transport runner is implemented, enabling JACCL_TEST_RDMA should fail clearly
-rather than reporting a false pass:
+The explicit hardware gate is a manual macOS RDMA validation path, not part of
+ordinary test runs. Discovery/failure-path checks require `JACCL_TEST_RDMA=1`.
+Tests that transition queue pairs to RTR also require
+`JACCL_TEST_RDMA_ALLOW_RTR=1`.
 
 $ JACCL_TEST_RDMA=1 go test -v . -run '^TestIntegration'
 
 === RUN   TestIntegrationTwoRankBarrierAndAllSum
-    integration_test.go:17: RDMA two-rank integration runner is not implemented
---- FAIL: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
 === RUN   TestIntegrationTwoRankAllMax
-    integration_test.go:22: RDMA two-rank AllMax integration runner is not implemented
---- FAIL: TestIntegrationTwoRankAllMax (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationTwoRankAllMax (0.00s)
 === RUN   TestIntegrationTwoRankAllMin
-    integration_test.go:27: RDMA two-rank AllMin integration runner is not implemented
---- FAIL: TestIntegrationTwoRankAllMin (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationTwoRankAllMin (0.00s)
 === RUN   TestIntegrationTwoRankAllGather
-    integration_test.go:32: RDMA two-rank AllGather integration runner is not implemented
---- FAIL: TestIntegrationTwoRankAllGather (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationTwoRankAllGather (0.00s)
 === RUN   TestIntegrationTwoRankSendRecv
-    integration_test.go:37: RDMA two-rank Send/Recv integration runner is not implemented
---- FAIL: TestIntegrationTwoRankSendRecv (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationTwoRankSendRecv (0.00s)
 === RUN   TestIntegrationPeerFailure
-    integration_test.go:42: RDMA peer-failure integration runner is not implemented
---- FAIL: TestIntegrationPeerFailure (0.00s)
+=== RUN   TestIntegrationPeerFailure/PropagatesDialContextDeadline
+--- PASS: TestIntegrationPeerFailure (0.01s)
+    --- PASS: TestIntegrationPeerFailure/PropagatesDialContextDeadline (0.01s)
 === RUN   TestIntegrationRingPreferredWhenValid
-    integration_test.go:47: RDMA ring integration runner is not implemented
---- FAIL: TestIntegrationRingPreferredWhenValid (0.00s)
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationRingPreferredWhenValid (0.00s)
 === RUN   TestIntegrationMeshFallbackWhenRingInvalid
-    integration_test.go:52: RDMA mesh integration runner is not implemented
---- FAIL: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
-FAIL
-exit status 1
-FAIL	github.com/tmc/gojaccl	0.241s
-
-Target output once the hardware runner exists:
-
-=== RUN   TestIntegrationTwoRankBarrierAndAllSum
-=== RUN   TestIntegrationTwoRankBarrierAndAllSum/StaggeredBarrier
-=== RUN   TestIntegrationTwoRankBarrierAndAllSum/PostBarrierAllSumInt32
---- PASS: TestIntegrationTwoRankBarrierAndAllSum
-...
+    integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
+--- SKIP: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
 PASS
-ok  	github.com/tmc/gojaccl	2.081s
+ok  	github.com/tmc/gojaccl	0.241s
 
 == Benchmark cases to add outside `go test -v` ==
 

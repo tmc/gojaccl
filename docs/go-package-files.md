@@ -1,7 +1,6 @@
 # Go JACCL Package File Layout
 
-This document records the intended Go file layout for the first implementation
-slice. It is a planning artifact, not generated output.
+This document records the Go file layout for the current implementation.
 
 The layout keeps the public package small, hides transport details in internal
 packages, and avoids introducing new packages until the implementation needs
@@ -27,7 +26,6 @@ Implementation files:
 
 Test and benchmark files:
 
-- `contract_test.go`: temporary pending-implementation contract helper.
 - `backend_test.go`: backend selection, `Available`, and backend abstraction
   tests.
 - `config_test.go`: environment parsing and configuration validation tests.

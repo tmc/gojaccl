@@ -11,9 +11,6 @@ var (
 
 	// ErrBusy reports that a group already has an active operation.
 	ErrBusy = errors.New("operation in progress")
-
-	// ErrNotImplemented reports an accepted API path whose backend is not built.
-	ErrNotImplemented = errors.New("not implemented")
 )
 
 type opError struct {
