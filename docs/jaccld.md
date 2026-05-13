@@ -81,6 +81,10 @@ protocol is intentionally small:
 - `free`: release a range lease.
 - `map`: return the slab descriptor with `SCM_RIGHTS`.
 - `stats`: return slab usage and daemon health.
+- `send`: ask the daemon transport to send a leased slab range to a peer.
+- `recv`: ask the daemon transport to receive a peer transfer into a leased
+  slab range.
+- `barrier`: ask the daemon transport to synchronize active peers.
 
 This is a control protocol, not a tensor planner. Tensor-parallel decisions and
 mesh placement remain outside `jaccld`.

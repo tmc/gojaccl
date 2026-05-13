@@ -64,6 +64,47 @@ func (c *Client) Free(ctx context.Context, id uint64) error {
 	return err
 }
 
+// Barrier waits until the daemon transport reaches a barrier.
+func (c *Client) Barrier(ctx context.Context) error {
+	_, fds, err := c.do(ctx, Request{Op: opBarrier})
+	closeFDs(fds)
+	return err
+}
+
+// Send asks the daemon to send a slab range to peer.
+//
+// The lease value may describe a subrange of the original allocation by keeping
+// the same ID and narrowing Offset and Length. The server validates the range
+// against the original lease bounds.
+func (c *Client) Send(ctx context.Context, peer int, lease allocator.Lease) error {
+	_, fds, err := c.do(ctx, Request{
+		Op:      opSend,
+		LeaseID: lease.ID,
+		Peer:    peer,
+		Offset:  lease.Offset,
+		Length:  lease.Length,
+	})
+	closeFDs(fds)
+	return err
+}
+
+// Recv asks the daemon to receive a slab range from peer.
+//
+// The lease value may describe a subrange of the original allocation by keeping
+// the same ID and narrowing Offset and Length. The server validates the range
+// against the original lease bounds.
+func (c *Client) Recv(ctx context.Context, peer int, lease allocator.Lease) error {
+	_, fds, err := c.do(ctx, Request{
+		Op:      opRecv,
+		LeaseID: lease.ID,
+		Peer:    peer,
+		Offset:  lease.Offset,
+		Length:  lease.Length,
+	})
+	closeFDs(fds)
+	return err
+}
+
 // Stats returns daemon slab statistics.
 func (c *Client) Stats(ctx context.Context) (allocator.Stats, error) {
 	resp, fds, err := c.do(ctx, Request{Op: opStats})

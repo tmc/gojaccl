@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -97,6 +98,119 @@ func TestClientReportsServerErrors(t *testing.T) {
 	}
 }
 
+func TestClientSendRecvBarrier(t *testing.T) {
+	tr := newFakeTransport()
+	_, client, _, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+	defer client.Close()
+
+	lease, err := client.Alloc(context.Background(), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Send(context.Background(), 1, lease); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Recv(context.Background(), 2, lease); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Barrier(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := tr.calls()
+	want := []transportCall{
+		{op: opSend, peer: 1, offset: lease.Offset, length: lease.Length},
+		{op: opRecv, peer: 2, offset: lease.Offset, length: lease.Length},
+		{op: opBarrier},
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("transport calls = %+v, want %+v", got, want)
+	}
+}
+
+func TestClientSendRecvErrors(t *testing.T) {
+	tr := newFakeTransport()
+	tr.err = errors.New("transport down")
+	_, client, _, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+	defer client.Close()
+
+	lease, err := client.Alloc(context.Background(), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Send(context.Background(), 1, lease); err == nil || !strings.Contains(err.Error(), tr.err.Error()) {
+		t.Fatalf("Send transport error = %v, want %v", err, tr.err)
+	}
+	if err := client.Recv(context.Background(), 1, allocator.Lease{ID: lease.ID, Offset: lease.Offset + 8, Length: 16}); err == nil || !strings.Contains(err.Error(), "outside lease") {
+		t.Fatalf("Recv out of range = %v, want range error", err)
+	}
+	if err := client.Send(context.Background(), -1, lease); err == nil || !strings.Contains(err.Error(), "peer -1") {
+		t.Fatalf("Send bad peer = %v, want peer error", err)
+	}
+}
+
+func TestClientDataOpsNeedTransport(t *testing.T) {
+	_, client, _, cleanup := startTestServer(t, 64)
+	defer cleanup()
+	defer client.Close()
+
+	lease, err := client.Alloc(context.Background(), 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Send(context.Background(), 1, lease); err == nil || !strings.Contains(err.Error(), ErrNoTransport.Error()) {
+		t.Fatalf("Send without transport = %v, want ErrNoTransport", err)
+	}
+	if err := client.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), ErrNoTransport.Error()) {
+		t.Fatalf("Barrier without transport = %v, want ErrNoTransport", err)
+	}
+}
+
+func TestCheckRange(t *testing.T) {
+	lease := allocator.Lease{ID: 7, Offset: 10, Length: 20}
+	leases := map[uint64]allocator.Lease{lease.ID: lease}
+	tests := []struct {
+		name string
+		req  Request
+	}{
+		{
+			name: "UnknownLease",
+			req:  Request{LeaseID: 99, Peer: 1, Offset: 10, Length: 1},
+		},
+		{
+			name: "NegativePeer",
+			req:  Request{LeaseID: lease.ID, Peer: -1, Offset: 10, Length: 1},
+		},
+		{
+			name: "NegativeLength",
+			req:  Request{LeaseID: lease.ID, Peer: 1, Offset: 10, Length: -1},
+		},
+		{
+			name: "BeforeLease",
+			req:  Request{LeaseID: lease.ID, Peer: 1, Offset: 9, Length: 1},
+		},
+		{
+			name: "AfterLease",
+			req:  Request{LeaseID: lease.ID, Peer: 1, Offset: 29, Length: 2},
+		},
+		{
+			name: "Overflow",
+			req:  Request{LeaseID: lease.ID, Peer: 1, Offset: 1<<63 - 1, Length: 1},
+		},
+	}
+	if err := checkRange(Request{LeaseID: lease.ID, Peer: 1, Offset: 12, Length: 8}, leases); err != nil {
+		t.Fatalf("checkRange valid subrange: %v", err)
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := checkRange(tt.req, leases); err == nil {
+				t.Fatal("checkRange = nil, want error")
+			}
+		})
+	}
+}
+
 func TestDialMissingSocket(t *testing.T) {
 	if _, err := Dial(context.Background(), filepath.Join(t.TempDir(), "missing.sock")); err == nil {
 		t.Fatal("Dial missing socket = nil")
@@ -104,13 +218,17 @@ func TestDialMissingSocket(t *testing.T) {
 }
 
 func startTestServer(t *testing.T, size int64) (*allocator.Slab, *Client, string, func()) {
+	return startTestServerWithTransport(t, size, nil)
+}
+
+func startTestServerWithTransport(t *testing.T, size int64, transport Transport) (*allocator.Slab, *Client, string, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	slab, err := allocator.NewSlab(dir, size)
 	if err != nil {
 		t.Fatal(err)
 	}
-	server, err := NewServer(slab)
+	server, err := NewServer(slab, transport)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,6 +260,50 @@ func startTestServer(t *testing.T, size int64) (*allocator.Slab, *Client, string
 		}
 		_ = os.Remove(socket)
 	}
+}
+
+type transportCall struct {
+	op     string
+	peer   int
+	offset int64
+	length int64
+}
+
+type fakeTransport struct {
+	mu  sync.Mutex
+	err error
+	log []transportCall
+}
+
+func newFakeTransport() *fakeTransport {
+	return &fakeTransport{}
+}
+
+func (f *fakeTransport) Barrier(context.Context) error {
+	f.record(transportCall{op: opBarrier})
+	return f.err
+}
+
+func (f *fakeTransport) Send(_ context.Context, peer int, offset, length int64) error {
+	f.record(transportCall{op: opSend, peer: peer, offset: offset, length: length})
+	return f.err
+}
+
+func (f *fakeTransport) Recv(_ context.Context, peer int, offset, length int64) error {
+	f.record(transportCall{op: opRecv, peer: peer, offset: offset, length: length})
+	return f.err
+}
+
+func (f *fakeTransport) record(call transportCall) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.log = append(f.log, call)
+}
+
+func (f *fakeTransport) calls() []transportCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]transportCall(nil), f.log...)
 }
 
 func waitSocket(t *testing.T, path string) {

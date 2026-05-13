@@ -63,7 +63,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 	go tracker.Run(ctx)
 
-	server, err := ipc.NewServer(slab)
+	server, err := ipc.NewServer(slab, nil)
 	if err != nil {
 		return err
 	}

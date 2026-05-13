@@ -136,15 +136,21 @@ Package name: `ipc`.
 
 Files:
 
-- `protocol.go`: small JSON control protocol shared by client and server.
+- `protocol.go`: small JSON control protocol shared by client and server,
+  including slab lease, map, stats, barrier, send, and recv operations.
 - `server.go`: Unix-domain socket server, `alloc`, `free`, `map`, `stats`, and
-  `SCM_RIGHTS` file descriptor passing.
-- `client.go`: local daemon client, slab mapping, and connection lifecycle.
-- `ipc_test.go`: hardware-free UDS, FD-passing, mmap, and disconnect cleanup
+  `SCM_RIGHTS` file descriptor passing, plus data-path dispatch through an
+  injected `Transport`.
+- `client.go`: local daemon client, slab mapping, data-path requests, and
+  connection lifecycle.
+- `ipc_test.go`: hardware-free UDS, FD-passing, mmap, disconnect cleanup,
+  transport dispatch, lease-bound range validation, and missing-transport
   tests.
 
 Keep this package as a local control plane. It must not decide tensor placement
-or allocate RDMA hardware resources per connection.
+or allocate RDMA hardware resources per connection. Data movement is expressed
+only as peer plus slab-offset ranges; the injected transport owns how those
+ranges reach RDMA.
 
 ## `gojaccl/internal/keepalive`
 

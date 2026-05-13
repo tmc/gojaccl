@@ -125,13 +125,15 @@ package ipc // import "./internal/ipc"
 Package ipc implements the jaccld Unix-domain socket control protocol.
 
 const DefaultSocket = "/tmp/jaccld.sock"
+var ErrNoTransport = errors.New("jaccld transport unavailable")
 type Client struct{ ... }
     func Dial(ctx context.Context, path string) (*Client, error)
 type Mapping struct{ ... }
 type Request struct{ ... }
 type Response struct{ ... }
 type Server struct{ ... }
-    func NewServer(slab *allocator.Slab) (*Server, error)
+    func NewServer(slab *allocator.Slab, transport Transport) (*Server, error)
+type Transport interface{ ... }
 
 == gojaccl/internal/keepalive ==
 

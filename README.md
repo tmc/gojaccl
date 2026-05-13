@@ -18,9 +18,10 @@ does not register caller heap memory in the hot path.
 
 `cmd/jaccld` is the daemon path for macOS Thunderbolt RDMA resource ownership.
 It keeps the device, protection domain, and global registered slab in one
-process and serves local clients over a Unix-domain socket. The daemon building
-blocks are present; wiring the public collectives to the daemon IPC client is a
-separate integration step.
+process and serves local clients over a Unix-domain socket. The daemon IPC
+protocol can lease/map the slab and describe send, receive, and barrier work
+over slab offsets through an injected transport. Wiring the public collectives
+to that IPC client is a separate integration step.
 
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
 `direct` selects it intentionally. `daemon` is accepted as configuration but

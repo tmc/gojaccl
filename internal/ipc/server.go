@@ -15,15 +15,26 @@ import (
 
 // Server serves local jaccld control requests.
 type Server struct {
-	slab *allocator.Slab
+	slab      *allocator.Slab
+	transport Transport
+}
+
+// Transport performs daemon-owned data movement over registered slab offsets.
+type Transport interface {
+	Barrier(context.Context) error
+	Send(context.Context, int, int64, int64) error
+	Recv(context.Context, int, int64, int64) error
 }
 
 // NewServer returns a Server backed by slab.
-func NewServer(slab *allocator.Slab) (*Server, error) {
+func NewServer(slab *allocator.Slab, transport Transport) (*Server, error) {
 	if slab == nil {
 		return nil, fmt.Errorf("new ipc server: nil slab")
 	}
-	return &Server{slab: slab}, nil
+	if transport == nil {
+		transport = disabledTransport{}
+	}
+	return &Server{slab: slab, transport: transport}, nil
 }
 
 // ListenAndServe listens on path and serves until ctx is canceled.
@@ -63,13 +74,13 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 			}
 			return fmt.Errorf("accept ipc: %w", err)
 		}
-		go s.serve(conn)
+		go s.serve(ctx, conn)
 	}
 }
 
-func (s *Server) serve(conn *net.UnixConn) {
+func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 	defer conn.Close()
-	leases := make(map[uint64]struct{})
+	leases := make(map[uint64]allocator.Lease)
 	defer func() {
 		for id := range leases {
 			_ = s.slab.Free(id)
@@ -91,7 +102,7 @@ func (s *Server) serve(conn *net.UnixConn) {
 				_ = writeControl(conn, Response{Error: err.Error()}, nil)
 				continue
 			}
-			leases[lease.ID] = struct{}{}
+			leases[lease.ID] = lease
 			_ = writeControl(conn, Response{OK: true, Lease: lease}, nil)
 		case opFree:
 			if _, ok := leases[req.LeaseID]; !ok {
@@ -103,6 +114,32 @@ func (s *Server) serve(conn *net.UnixConn) {
 				continue
 			}
 			delete(leases, req.LeaseID)
+			_ = writeControl(conn, Response{OK: true}, nil)
+		case opSend:
+			if err := checkRange(req, leases); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			if err := s.transport.Send(ctx, req.Peer, req.Offset, req.Length); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true}, nil)
+		case opRecv:
+			if err := checkRange(req, leases); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			if err := s.transport.Recv(ctx, req.Peer, req.Offset, req.Length); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true}, nil)
+		case opBarrier:
+			if err := s.transport.Barrier(ctx); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
 			_ = writeControl(conn, Response{OK: true}, nil)
 		case opMap:
 			fd, err := s.slab.FD()
@@ -117,6 +154,39 @@ func (s *Server) serve(conn *net.UnixConn) {
 			_ = writeControl(conn, Response{Error: fmt.Sprintf("unknown op %q", req.Op)}, nil)
 		}
 	}
+}
+
+type disabledTransport struct{}
+
+func (disabledTransport) Barrier(context.Context) error {
+	return ErrNoTransport
+}
+
+func (disabledTransport) Send(context.Context, int, int64, int64) error {
+	return ErrNoTransport
+}
+
+func (disabledTransport) Recv(context.Context, int, int64, int64) error {
+	return ErrNoTransport
+}
+
+func checkRange(req Request, leases map[uint64]allocator.Lease) error {
+	if req.Peer < 0 {
+		return fmt.Errorf("peer %d out of range", req.Peer)
+	}
+	lease, ok := leases[req.LeaseID]
+	if !ok {
+		return allocator.ErrLeaseNotFound
+	}
+	if req.Length < 0 {
+		return fmt.Errorf("lease %d length %d is negative", req.LeaseID, req.Length)
+	}
+	end := req.Offset + req.Length
+	leaseEnd := lease.Offset + lease.Length
+	if end < req.Offset || req.Offset < lease.Offset || end > leaseEnd {
+		return fmt.Errorf("range [%d,%d) outside lease %d range [%d,%d)", req.Offset, end, req.LeaseID, lease.Offset, leaseEnd)
+	}
+	return nil
 }
 
 func readControl(conn *net.UnixConn, v any) error {
