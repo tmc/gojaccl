@@ -109,7 +109,8 @@ Files:
 - `rdma_darwin_arm64.go`: the Darwin/ARM64 purego verbs wrapper, including
   dynamic loading, device context ownership, protection domains, completion
   queues, UC queue pairs, mmap-backed staging memory registration, work
-  request posting, completion polling, context checks, and hybrid backoff.
+  request posting including RDMA write, completion polling, context checks, and
+  hybrid backoff.
 - `rdma_test.go`: loader, device, queue, memory, work request, polling, and
   purego-boundary tests.
 
@@ -165,9 +166,8 @@ Files:
 - `heartbeat_test.go`: idle, touch, error, and bad-input tests using fake
   senders and a fake clock.
 
-This package is a scheduling primitive for daemon-owned keepalives. It is not
-yet wired into `jaccld` data queue pairs because safe heartbeats require an
-RDMA write sink or a framed SEND/RECV protocol.
+This package schedules daemon-owned keepalives. `jaccld` adapts peer queue
+pairs with RDMA-write senders that target a reserved slab byte.
 
 ## `gojaccl/cmd/jaccld`
 
@@ -179,8 +179,8 @@ Files:
   RDMA device/protection-domain/MR startup, daemon rank validation, transport
   injection, and IPC listener startup.
 - `transport.go`: daemon-owned RDMA point-to-point transport, side-channel
-  destination exchange, queue-pair setup, slab-offset send and recv, barrier,
-  and transport close behavior.
+  destination exchange, queue-pair setup, slab-offset send and recv,
+  RDMA-write heartbeat setup, barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 
@@ -189,8 +189,8 @@ startup must validate `-rank`, `-size`, and `-coordinator`, open the hardware,
 register the single global slab, and connect peer daemon ranks before serving
 clients.
 
-Do not add a `-heartbeat` flag until the daemon has a safe protocol that cannot
-consume user receives or leave posted work on the data queue pair.
+Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
+peer receives and is not safe on the raw data queue pair.
 
 ## Files Not To Add Yet
 

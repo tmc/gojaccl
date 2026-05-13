@@ -22,8 +22,7 @@ resource limits:
   transfer is not viable. The daemon must register one large slab and sublease
   byte ranges from it.
 - Queue pairs become unreliable after roughly 23 idle minutes. The daemon must
-  eventually keep every active queue pair warm independently of user traffic.
-  The current Go daemon does not yet implement that heartbeat protocol.
+  keep every active queue pair warm independently of user traffic.
 
 These constraints rule out a library-only architecture. Short-lived Python,
 MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
@@ -38,7 +37,8 @@ On startup, `jaccld`:
 4. Creates and registers one shared memory slab.
 5. Creates queue pairs for the other daemon ranks and exchanges destinations
    on the TCP side channel.
-6. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
+6. Starts RDMA-write heartbeat management for active queue pairs.
+7. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
 
 The daemon releases RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not
@@ -66,18 +66,18 @@ The allocator coalesces freed ranges and rejects allocations outside the fixed
 slab. The registered MR covers the entire slab, so transfers refer to offsets
 within the one registered memory region.
 
-## Keepalive Blocker
+## Keepalive Model
 
 Apple's Thunderbolt RDMA provider requires active traffic to prevent queue-pair
-degradation after roughly 23 minutes. The current Go daemon explicitly lacks a
-safe heartbeat protocol.
+degradation after roughly 23 minutes. The daemon reserves one byte in its
+registered slab and publishes that byte's registered address and rkey with the
+queue-pair destination metadata.
 
-Do not fake this with one-byte `IBV_WR_SEND` operations on the data queue pair.
-The daemon data path has no message header or tag, so a heartbeat send can
-consume a user's posted receive or fail when no receive is posted. A safe
-heartbeat needs either RDMA write support to a reserved sink byte, or an
-explicit framed SEND/RECV work protocol that can distinguish heartbeat traffic
-from user payloads.
+Each active peer route has a last-activity timestamp. When a route is idle for
+the configured interval, the daemon posts a one-byte RDMA write to the peer's
+reserved sink byte and waits for the local completion. This keeps the data queue
+pair active without consuming peer receive work requests and without writing
+into user payload buffers.
 
 ## IPC Model
 
@@ -125,12 +125,11 @@ lease expiry. It does not decide tensor parallelism policy.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
-- `internal/keepalive/heartbeat.go`: idle-route scheduling primitive for the
-  future heartbeat protocol.
+- `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions
 
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
-Do not rely on user traffic to keep queue pairs alive before declaring the
-daemon production-ready.
+Do not use SEND-based heartbeats on the data queue pair; they can consume user
+receives. Heartbeats must use RDMA write or an explicitly framed protocol.

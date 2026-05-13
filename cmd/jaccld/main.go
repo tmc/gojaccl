@@ -11,9 +11,11 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/tmc/gojaccl/internal/allocator"
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
 )
 
@@ -25,6 +27,7 @@ func main() {
 	flag.IntVar(&cfg.size, "size", 0, "number of daemon ranks")
 	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
+	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "idle queue-pair heartbeat interval")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
 
@@ -42,6 +45,7 @@ type config struct {
 	size        int
 	coordinator string
 	slabSize    int64
+	heartbeat   time.Duration
 	noRDMA      bool
 }
 
@@ -57,6 +61,14 @@ func run(ctx context.Context, cfg config) error {
 	}
 	defer slab.Close()
 
+	var heartbeat allocator.Lease
+	if !cfg.noRDMA {
+		heartbeat, err = slab.Alloc(1)
+		if err != nil {
+			return fmt.Errorf("reserve heartbeat byte: %w", err)
+		}
+	}
+
 	var hw *hardware
 	if !cfg.noRDMA {
 		hw, err = openHardware(cfg.device, slab)
@@ -66,10 +78,19 @@ func run(ctx context.Context, cfg config) error {
 		defer hw.Close()
 	}
 
+	var tracker *keepalive.Tracker
+	if hw != nil {
+		tracker, err = keepalive.New(cfg.heartbeat)
+		if err != nil {
+			return err
+		}
+		go tracker.Run(ctx)
+	}
+
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
-		rdmaTransport, err = openDaemonTransport(ctx, cfg, hw)
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, hw, tracker, heartbeat.Offset)
 		if err != nil {
 			return err
 		}
@@ -96,6 +117,9 @@ func (cfg config) validateRDMA() error {
 	}
 	if strings.TrimSpace(cfg.coordinator) == "" {
 		return fmt.Errorf("coordinator is empty")
+	}
+	if cfg.heartbeat <= 0 {
+		return fmt.Errorf("heartbeat interval %s must be positive", cfg.heartbeat)
 	}
 	return nil
 }

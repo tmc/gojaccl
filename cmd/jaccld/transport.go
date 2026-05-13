@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/tcpchan"
 )
@@ -16,26 +17,39 @@ type daemonTransport struct {
 	rank int
 	size int
 
-	mr    *rdma.MemoryRegion
-	side  *tcpchan.Channel
-	conns []*daemonConn
+	mr              *rdma.MemoryRegion
+	side            *tcpchan.Channel
+	tracker         *keepalive.Tracker
+	heartbeatOffset int64
+	conns           []*daemonConn
 }
 
 type daemonConn struct {
-	cq *rdma.CompletionQueue
-	qp *rdma.QueuePair
-	mu sync.Mutex
+	cq                  *rdma.CompletionQueue
+	qp                  *rdma.QueuePair
+	remoteHeartbeatAddr uint64
+	remoteRKey          uint32
+	mu                  sync.Mutex
 }
 
-func openDaemonTransport(ctx context.Context, cfg config, hw *hardware) (*daemonTransport, error) {
+type daemonDestination struct {
+	QP              rdma.Destination `json:"qp"`
+	MRAddr          uint64           `json:"mr_addr"`
+	RKey            uint32           `json:"rkey"`
+	HeartbeatOffset int64            `json:"heartbeat_offset"`
+}
+
+func openDaemonTransport(ctx context.Context, cfg config, hw *hardware, tracker *keepalive.Tracker, heartbeatOffset int64) (*daemonTransport, error) {
 	if hw == nil || hw.dev == nil || hw.pd == nil || hw.mr == nil {
 		return nil, fmt.Errorf("open daemon transport: nil hardware")
 	}
 	t := &daemonTransport{
-		rank:  cfg.rank,
-		size:  cfg.size,
-		mr:    hw.mr,
-		conns: make([]*daemonConn, cfg.size),
+		rank:            cfg.rank,
+		size:            cfg.size,
+		mr:              hw.mr,
+		tracker:         tracker,
+		heartbeatOffset: heartbeatOffset,
+		conns:           make([]*daemonConn, cfg.size),
 	}
 	if err := t.open(ctx, cfg, hw); err != nil {
 		_ = t.Close()
@@ -51,7 +65,7 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware) er
 	}
 	t.side = side
 
-	local := make([]rdma.Destination, t.size)
+	local := make([]daemonDestination, t.size)
 	for peer := 0; peer < t.size; peer++ {
 		if peer == t.rank {
 			continue
@@ -61,7 +75,12 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware) er
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		t.conns[peer] = conn
-		local[peer] = dst
+		local[peer] = daemonDestination{
+			QP:              dst,
+			MRAddr:          hw.mr.Addr(),
+			RKey:            hw.mr.RKey(),
+			HeartbeatOffset: t.heartbeatOffset,
+		}
 	}
 
 	payload, err := json.Marshal(local)
@@ -72,7 +91,7 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware) er
 	if err != nil {
 		return fmt.Errorf("exchange destinations: %w", err)
 	}
-	all := make([][]rdma.Destination, t.size)
+	all := make([][]daemonDestination, t.size)
 	for rank, data := range allPayloads {
 		if err := json.Unmarshal(data, &all[rank]); err != nil {
 			return fmt.Errorf("decode destinations from rank %d: %w", rank, err)
@@ -87,17 +106,48 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware) er
 			continue
 		}
 		remote := all[peer][t.rank]
-		if err := rdma.ReadyToReceive(conn.qp, remote); err != nil {
+		if err := rdma.ReadyToReceive(conn.qp, remote.QP); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
-		if err := rdma.ReadyToSend(conn.qp, local[peer].PSN); err != nil {
+		if err := rdma.ReadyToSend(conn.qp, local[peer].QP.PSN); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
+		}
+		addr, err := heartbeatAddress(remote)
+		if err != nil {
+			return fmt.Errorf("peer %d heartbeat: %w", peer, err)
+		}
+		conn.remoteHeartbeatAddr = addr
+		conn.remoteRKey = remote.RKey
+		if t.tracker != nil {
+			peer := peer
+			if err := t.tracker.Add(t.routeID(peer), keepalive.SenderFunc(func(ctx context.Context) error {
+				return t.heartbeat(ctx, peer)
+			})); err != nil {
+				return err
+			}
 		}
 	}
 	if err := t.side.Barrier(ctx); err != nil {
 		return fmt.Errorf("ready barrier: %w", err)
 	}
 	return nil
+}
+
+func heartbeatAddress(dst daemonDestination) (uint64, error) {
+	if dst.MRAddr == 0 {
+		return 0, fmt.Errorf("missing remote memory address")
+	}
+	if dst.RKey == 0 {
+		return 0, fmt.Errorf("missing remote memory key")
+	}
+	if dst.HeartbeatOffset < 0 {
+		return 0, fmt.Errorf("negative remote heartbeat offset %d", dst.HeartbeatOffset)
+	}
+	addr := dst.MRAddr + uint64(dst.HeartbeatOffset)
+	if addr < dst.MRAddr {
+		return 0, fmt.Errorf("remote heartbeat address overflow")
+	}
+	return addr, nil
 }
 
 func openDaemonConn(hw *hardware) (*daemonConn, rdma.Destination, error) {
@@ -188,7 +238,10 @@ func (t *daemonTransport) Close() error {
 		return nil
 	}
 	var first error
-	for _, conn := range t.conns {
+	for peer, conn := range t.conns {
+		if t.tracker != nil {
+			t.tracker.Remove(t.routeID(peer))
+		}
 		if conn != nil {
 			if err := conn.close(); err != nil && first == nil {
 				first = err
@@ -218,6 +271,26 @@ func (t *daemonTransport) rangeInMR(offset, length int64) (int, int, error) {
 	return int(offset), int(length), nil
 }
 
+func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
+	start, _, err := t.rangeInMR(t.heartbeatOffset, 1)
+	if err != nil {
+		return err
+	}
+	conn, err := t.conn(peer)
+	if err != nil {
+		return err
+	}
+	conn.mu.Lock()
+	defer conn.mu.Unlock()
+	if conn.remoteHeartbeatAddr == 0 || conn.remoteRKey == 0 {
+		return fmt.Errorf("rank %d has no heartbeat target", peer)
+	}
+	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, conn.remoteHeartbeatAddr, conn.remoteRKey, transportWorkID(3, peer)); err != nil {
+		return err
+	}
+	return t.poll(ctx, conn, 1)
+}
+
 func (t *daemonTransport) conn(peer int) (*daemonConn, error) {
 	if peer < 0 || peer >= t.size {
 		return nil, fmt.Errorf("rank %d out of range for size %d", peer, t.size)
@@ -227,6 +300,10 @@ func (t *daemonTransport) conn(peer int) (*daemonConn, error) {
 		return nil, fmt.Errorf("rank %d has no RDMA connection", peer)
 	}
 	return conn, nil
+}
+
+func (t *daemonTransport) routeID(peer int) string {
+	return fmt.Sprintf("rank-%d", peer)
 }
 
 func (t *daemonTransport) poll(ctx context.Context, conn *daemonConn, n int) error {
@@ -240,6 +317,8 @@ func (t *daemonTransport) poll(ctx context.Context, conn *daemonConn, n int) err
 
 func (c *daemonConn) close() error {
 	var first error
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.qp != nil {
 		if err := c.qp.Close(); err != nil && first == nil {
 			first = err

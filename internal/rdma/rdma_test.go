@@ -137,6 +137,11 @@ func TestWorkRequests(t *testing.T) {
 			t.Fatal("PostRecv(nil) = nil")
 		}
 	})
+	t.Run("PostWriteFailure", func(t *testing.T) {
+		if err := PostWrite(nil, nil, 0, 1, 0, 0, 1); err == nil {
+			t.Fatal("PostWrite(nil) = nil")
+		}
+	})
 }
 
 func TestPollCompletion(t *testing.T) {

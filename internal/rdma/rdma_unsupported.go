@@ -63,6 +63,10 @@ func PostRecv(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64) er
 	return ErrUnavailable
 }
 
+func PostWrite(qp *QueuePair, mr *MemoryRegion, offset, length int, remoteAddr uint64, rkey uint32, id uint64) error {
+	return ErrUnavailable
+}
+
 func PollCompletion(ctx context.Context, cq *CompletionQueue) ([]WorkRequest, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

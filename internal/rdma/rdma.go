@@ -3,6 +3,7 @@ package rdma
 import (
 	"errors"
 	"sync"
+	"unsafe"
 )
 
 // ErrUnavailable reports that the platform RDMA backend cannot be used.
@@ -87,6 +88,14 @@ func (m *MemoryRegion) RKey() uint32 {
 		return 0
 	}
 	return m.rkey
+}
+
+// Addr reports the local address of the registered memory.
+func (m *MemoryRegion) Addr() uint64 {
+	if m == nil || len(m.buf) == 0 {
+		return 0
+	}
+	return uint64(uintptr(unsafe.Pointer(&m.buf[0])))
 }
 
 // Destination is the queue-pair metadata exchanged on the TCP side channel.

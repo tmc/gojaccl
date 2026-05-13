@@ -17,27 +17,32 @@ func TestConfigValidateRDMA(t *testing.T) {
 	}{
 		{
 			name: "valid",
-			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345"},
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 		},
 		{
 			name: "negative rank",
-			cfg:  config{rank: -1, size: 2, coordinator: "127.0.0.1:12345"},
+			cfg:  config{rank: -1, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 			want: "rank -1 out of range",
 		},
 		{
 			name: "zero size",
-			cfg:  config{rank: 0, size: 0, coordinator: "127.0.0.1:12345"},
+			cfg:  config{rank: 0, size: 0, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 			want: "size 0 must be positive",
 		},
 		{
 			name: "rank out of range",
-			cfg:  config{rank: 2, size: 2, coordinator: "127.0.0.1:12345"},
+			cfg:  config{rank: 2, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 			want: "rank 2 out of range for size 2",
 		},
 		{
 			name: "empty coordinator",
-			cfg:  config{rank: 0, size: 2},
+			cfg:  config{rank: 0, size: 2, heartbeat: time.Second},
 			want: "coordinator is empty",
+		},
+		{
+			name: "zero heartbeat",
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345"},
+			want: "heartbeat interval 0s must be positive",
 		},
 	}
 	for _, tt := range tests {

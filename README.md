@@ -51,15 +51,16 @@ do not run the RTR gate casually.
 A daemon rank is started with explicit rank metadata:
 
 ```sh
-jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
+jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000 -heartbeat 1m
 ```
 
 `-no-rdma` starts only the IPC server and slab allocator for hardware-free
 smoke tests.
 
-The daemon still lacks the safe idle-QP heartbeat protocol needed for long idle
-Apple Thunderbolt RDMA sessions. Do not treat daemon mode as production-ready
-until that protocol is implemented and hardware-validated.
+The daemon reserves one byte in the shared slab and exchanges the registered MR
+address and rkey with peer daemons. Idle heartbeats use RDMA write to that
+reserved byte so they do not consume peer receive work requests or corrupt user
+payloads.
 
 ## Dependency
 

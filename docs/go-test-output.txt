@@ -557,12 +557,14 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 === RUN   TestConfigValidateRDMA/zero_size
 === RUN   TestConfigValidateRDMA/rank_out_of_range
 === RUN   TestConfigValidateRDMA/empty_coordinator
+=== RUN   TestConfigValidateRDMA/zero_heartbeat
 --- PASS: TestConfigValidateRDMA (0.00s)
     --- PASS: TestConfigValidateRDMA/valid (0.00s)
     --- PASS: TestConfigValidateRDMA/negative_rank (0.00s)
     --- PASS: TestConfigValidateRDMA/zero_size (0.00s)
     --- PASS: TestConfigValidateRDMA/rank_out_of_range (0.00s)
     --- PASS: TestConfigValidateRDMA/empty_coordinator (0.00s)
+    --- PASS: TestConfigValidateRDMA/zero_heartbeat (0.00s)
 === RUN   TestRunNoRDMAStartsIPC
 --- PASS: TestRunNoRDMAStartsIPC (0.01s)
 PASS
@@ -639,11 +641,13 @@ ok  	<module>/gojaccl/cmd/jaccld	0.834s
 === RUN   TestWorkRequests/PostRecv
 === RUN   TestWorkRequests/PostSendFailure
 === RUN   TestWorkRequests/PostRecvFailure
+=== RUN   TestWorkRequests/PostWriteFailure
 --- PASS: TestWorkRequests (0.00s)
     --- PASS: TestWorkRequests/PostSend (0.00s)
     --- PASS: TestWorkRequests/PostRecv (0.00s)
     --- PASS: TestWorkRequests/PostSendFailure (0.00s)
     --- PASS: TestWorkRequests/PostRecvFailure (0.00s)
+    --- PASS: TestWorkRequests/PostWriteFailure (0.00s)
 === RUN   TestPollCompletion
 === RUN   TestPollCompletion/ReturnsCompletion
 === RUN   TestPollCompletion/ContextCancellation

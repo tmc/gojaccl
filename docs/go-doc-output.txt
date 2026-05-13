@@ -109,11 +109,12 @@ Command jaccld owns local Apple RDMA resources for jaccl clients.
 Each daemon rank is started with -rank, -size, and -coordinator unless -no-rdma
 is set. The daemon opens one RDMA device, allocates one protection domain,
 registers one shared slab memory region, creates queue pairs for peer daemon
-ranks, and serves local clients through a Unix-domain socket. The daemon
-transport supports barrier, send, and recv over leased slab offsets.
+ranks, starts RDMA-write heartbeats, and serves local clients through a
+Unix-domain socket. The daemon transport supports barrier, send, and recv over
+leased slab offsets.
 
-The daemon does not yet implement the safe idle-QP heartbeat protocol required
-for long idle Apple Thunderbolt RDMA sessions.
+Idle heartbeats use one-byte RDMA writes to a reserved slab byte published by
+each peer daemon. They do not consume peer receive work requests.
 
 == gojaccl/internal/allocator ==
 
@@ -153,8 +154,7 @@ package keepalive // import "./internal/keepalive"
 
 Package keepalive tracks idle routes that need daemon-owned heartbeats.
 
-The package is a scheduling primitive for a future safe heartbeat protocol. It
-is not currently wired into jaccld's RDMA data queue pairs.
+The package schedules idle RDMA-write heartbeats for jaccld peer routes.
 
 type Sender interface{ ... }
 type SenderFunc func(context.Context) error
@@ -172,7 +172,7 @@ Package rdma wraps the Apple RDMA verbs used by jaccl.
 This package is the boundary between jaccl's communicator logic and the
 generated github.com/tmc/apple/rdma bindings. It owns device discovery,
 protection domains, completion queues, queue pairs, memory registration, work
-requests, and completion polling.
+requests including send, receive, and RDMA write, and completion polling.
 
 Registered memory used by jaccl operations is mmap-backed staging memory owned
 by the backend. The public package must not expose memory registration or

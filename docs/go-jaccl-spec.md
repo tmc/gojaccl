@@ -249,7 +249,12 @@ over a Unix-domain socket. The daemon backend is optional and explicit. It
 supports barrier, send, and recv through slab leases; collectives remain on the
 direct backend until the IPC protocol has a deliberate asynchronous work model.
 
-The daemon still lacks a safe heartbeat for the Apple idle-QP failure. Do not
-use one-byte SEND heartbeats on the data queue pair without message framing; a
-heartbeat can consume a user receive. A production-ready daemon needs RDMA write
-support to a reserved sink byte or an equivalent framed protocol.
+The daemon uses RDMA-write heartbeats for the Apple idle-QP failure. Each daemon
+reserves one byte in the registered slab, publishes that address and rkey with
+its queue-pair destination metadata, and writes one byte to each idle peer route
+at the heartbeat interval. Do not replace this with SEND-based heartbeats; a
+SEND heartbeat can consume a user receive on the raw data queue pair.
+
+Follow-up: move the `IBV_WR_RDMA_WRITE` opcode constant into the generated
+`github.com/tmc/apple/rdma` binding surface. The internal wrapper uses the
+libibverbs opcode value until the generator emits the symbol.

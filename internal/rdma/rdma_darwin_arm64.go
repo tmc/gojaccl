@@ -4,6 +4,7 @@ package rdma
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"runtime"
 	"syscall"
@@ -416,6 +417,42 @@ func PostRecv(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64) er
 	return post(qp, mr, offset, length, id, false)
 }
 
+// PostWrite posts an RDMA write from mr[offset:offset+length] to remoteAddr.
+func PostWrite(qp *QueuePair, mr *MemoryRegion, offset, length int, remoteAddr uint64, rkey uint32, id uint64) error {
+	if qp == nil || qp.handle == 0 {
+		return fmt.Errorf("post write: nil queue pair")
+	}
+	if mr == nil || mr.handle == 0 {
+		return fmt.Errorf("post write: nil memory region")
+	}
+	if offset < 0 || length < 0 || offset+length > len(mr.buf) {
+		return fmt.Errorf("post write: range [%d,%d) outside buffer length %d", offset, offset+length, len(mr.buf))
+	}
+	if length == 0 {
+		return nil
+	}
+	sge := applerdma.IbvSGE{
+		Addr:   uint64(uintptr(unsafe.Pointer(&mr.buf[offset]))),
+		Length: uint32(length),
+		LKey:   mr.lkey,
+	}
+	wr := applerdma.IbvSendWR{
+		WRID:      id,
+		SGList:    &sge,
+		NumSGE:    1,
+		Opcode:    ibvWRRDMAWrite,
+		SendFlags: applerdma.IBV_SEND_SIGNALED,
+	}
+	binary.LittleEndian.PutUint64(wr.WR[0:8], remoteAddr)
+	binary.LittleEndian.PutUint32(wr.WR[8:12], rkey)
+	var bad *applerdma.IbvSendWR
+	poster := qp.poster.(applerdma.IbvQPPoster)
+	if rc := poster.PostSend(&wr, &bad); rc != 0 {
+		return fmt.Errorf("post write: errno %d", rc)
+	}
+	return nil
+}
+
 func post(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64, send bool) error {
 	if qp == nil || qp.handle == 0 {
 		return fmt.Errorf("post work request: nil queue pair")
@@ -460,6 +497,8 @@ func post(qp *QueuePair, mr *MemoryRegion, offset, length int, id uint64, send b
 	}
 	return nil
 }
+
+const ibvWRRDMAWrite = 0
 
 func PollCompletion(ctx context.Context, cq *CompletionQueue) ([]WorkRequest, error) {
 	if err := ctx.Err(); err != nil {
