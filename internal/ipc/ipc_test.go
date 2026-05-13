@@ -217,6 +217,20 @@ func TestDialMissingSocket(t *testing.T) {
 	}
 }
 
+func TestServerSocketOwnerOnly(t *testing.T) {
+	_, client, socket, cleanup := startTestServer(t, 64)
+	defer cleanup()
+	defer client.Close()
+
+	info, err := os.Stat(socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := info.Mode().Perm(); mode != 0600 {
+		t.Fatalf("socket mode = %#o, want 0600", mode)
+	}
+}
+
 func startTestServer(t *testing.T, size int64) (*allocator.Slab, *Client, string, func()) {
 	return startTestServerWithTransport(t, size, nil)
 }

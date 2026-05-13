@@ -38,6 +38,8 @@ func NewServer(slab *allocator.Slab, transport Transport) (*Server, error) {
 }
 
 // ListenAndServe listens on path and serves until ctx is canceled.
+// It sets the socket mode to 0600 after binding. Callers that need to avoid
+// the bind-to-chmod window should use a path in an owner-only directory.
 func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -52,6 +54,12 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 	ln, err := net.ListenUnix("unix", &addr)
 	if err != nil {
 		return fmt.Errorf("listen ipc %s: %w", path, err)
+	}
+	// The final mode is owner-only. A fully atomic owner-only bind requires
+	// placing the socket in an owner-only directory.
+	if err := os.Chmod(path, 0600); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("listen ipc %s: chmod socket: %w", path, err)
 	}
 	defer os.Remove(path)
 	defer ln.Close()
