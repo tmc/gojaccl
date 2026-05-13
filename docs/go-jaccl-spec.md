@@ -241,3 +241,15 @@ staging memory, and the TCP side channel. Mesh collectives exchange directly
 with connected peers. Ring collectives rotate payloads over adjacent links and
 reduce locally. Hardware integration tests are present but require explicit
 operator opt-in before driving the macOS RTR transition.
+
+`cmd/jaccld` owns the daemon path. It opens one RDMA device, allocates one
+protection domain, registers one shared slab memory region, exchanges daemon
+queue-pair destinations over the TCP side channel, and serves local IPC clients
+over a Unix-domain socket. The daemon backend is optional and explicit. It
+supports barrier, send, and recv through slab leases; collectives remain on the
+direct backend until the IPC protocol has a deliberate asynchronous work model.
+
+The daemon still lacks a safe heartbeat for the Apple idle-QP failure. Do not
+use one-byte SEND heartbeats on the data queue pair without message framing; a
+heartbeat can consume a user receive. A production-ready daemon needs RDMA write
+support to a reserved sink byte or an equivalent framed protocol.

@@ -19,9 +19,10 @@ does not register caller heap memory in the hot path.
 `cmd/jaccld` is the daemon path for macOS Thunderbolt RDMA resource ownership.
 It keeps the device, protection domain, and global registered slab in one
 process and serves local clients over a Unix-domain socket. The daemon IPC
-protocol can lease/map the slab and describe send, receive, and barrier work
-over slab offsets through an injected transport. Wiring the public collectives
-to that IPC client is a separate integration step.
+protocol leases and maps the slab, then asks the daemon-owned RDMA transport to
+send, receive, or synchronize over slab offsets. Daemon-backed collectives are
+still a separate integration step because the current IPC protocol is
+synchronous and intentionally does not multiplex concurrent work.
 
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
 `direct` selects it intentionally. `daemon` selects the IPC client backend for
@@ -46,6 +47,19 @@ JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -run '^TestIntegration' .
 
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
+
+A daemon rank is started with explicit rank metadata:
+
+```sh
+jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
+```
+
+`-no-rdma` starts only the IPC server and slab allocator for hardware-free
+smoke tests.
+
+The daemon still lacks the safe idle-QP heartbeat protocol needed for long idle
+Apple Thunderbolt RDMA sessions. Do not treat daemon mode as production-ready
+until that protocol is implemented and hardware-validated.
 
 ## Dependency
 

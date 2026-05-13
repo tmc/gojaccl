@@ -1,14 +1,14 @@
 # jaccld daemon design
 
 `jaccld` owns the Apple Thunderbolt RDMA hardware lifecycle for one host.
-The public Go JACCL API should become a client of this daemon rather than
-allocating verbs resources in each process.
+The public Go JACCL API can use this daemon instead of allocating verbs
+resources in each process.
 
 Use of the daemon backend is explicit. `Config.Backend` accepts `auto`,
 `direct`, and `daemon`; empty means `auto`. `auto` uses the working direct
 backend today. `daemon` uses the jaccld IPC client for barrier and
 point-to-point operations; daemon-backed collectives remain explicitly
-unsupported until the transport-neutral collective layer is wired.
+unsupported until the IPC transport can support concurrent work.
 
 ## Constraints
 
@@ -22,7 +22,8 @@ resource limits:
   transfer is not viable. The daemon must register one large slab and sublease
   byte ranges from it.
 - Queue pairs become unreliable after roughly 23 idle minutes. The daemon must
-  keep every active queue pair warm independently of user traffic.
+  eventually keep every active queue pair warm independently of user traffic.
+  The current Go daemon does not yet implement that heartbeat protocol.
 
 These constraints rule out a library-only architecture. Short-lived Python,
 MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
@@ -31,11 +32,13 @@ MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
 
 On startup, `jaccld`:
 
-1. Opens the configured RDMA device.
-2. Allocates one protection domain.
-3. Creates and registers one shared memory slab.
-4. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
-5. Starts keepalive management for active queue pairs.
+1. Validates `-rank`, `-size`, and `-coordinator` unless `-no-rdma` is set.
+2. Opens the configured RDMA device.
+3. Allocates one protection domain.
+4. Creates and registers one shared memory slab.
+5. Creates queue pairs for the other daemon ranks and exchanges destinations
+   on the TCP side channel.
+6. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
 
 The daemon releases RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not
@@ -63,15 +66,18 @@ The allocator coalesces freed ranges and rejects allocations outside the fixed
 slab. The registered MR covers the entire slab, so transfers refer to offsets
 within the one registered memory region.
 
-## Keepalive Model
+## Keepalive Blocker
 
-Each active queue pair has a last-activity timestamp. A heartbeat loop posts a
-zero-byte or one-byte send after the queue pair is idle for the configured
-interval, initially 60 seconds. Real sends and receives update the activity
-timestamp.
+Apple's Thunderbolt RDMA provider requires active traffic to prevent queue-pair
+degradation after roughly 23 minutes. The current Go daemon explicitly lacks a
+safe heartbeat protocol.
 
-Heartbeat failures mark the route unhealthy. The daemon reports unhealthy
-routes to clients and planners instead of hiding transport degradation.
+Do not fake this with one-byte `IBV_WR_SEND` operations on the data queue pair.
+The daemon data path has no message header or tag, so a heartbeat send can
+consume a user's posted receive or fail when no receive is posted. A safe
+heartbeat needs either RDMA write support to a reserved sink byte, or an
+explicit framed SEND/RECV work protocol that can distinguish heartbeat traffic
+from user payloads.
 
 ## IPC Model
 
@@ -89,6 +95,12 @@ protocol is intentionally small:
 
 This is a control protocol, not a tensor planner. Tensor-parallel decisions and
 mesh placement remain outside `jaccld`.
+
+The initial IPC protocol is deliberately synchronous: one JSON request receives
+one JSON response on one Unix-domain socket connection. Slab leases are scoped
+to the connection that allocated them so the server can release memory when a
+client crashes. Do not move collectives above the backend until the IPC layer
+has an explicit asynchronous work protocol or equivalent design.
 
 ## Planner Data
 
@@ -108,13 +120,17 @@ lease expiry. It does not decide tensor parallelism policy.
 
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
+- `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point transport over
+  the registered slab.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
-- `internal/keepalive/heartbeat.go`: idle queue-pair heartbeat scheduling.
+- `internal/keepalive/heartbeat.go`: idle-route scheduling primitive for the
+  future heartbeat protocol.
 
 ## Stop Conditions
 
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
-Do not rely on user traffic to keep queue pairs alive.
+Do not rely on user traffic to keep queue pairs alive before declaring the
+daemon production-ready.

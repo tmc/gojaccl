@@ -5,15 +5,15 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
-	"time"
 
 	"github.com/tmc/gojaccl/internal/allocator"
 	"github.com/tmc/gojaccl/internal/ipc"
-	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
 )
 
@@ -21,8 +21,10 @@ func main() {
 	var cfg config
 	flag.StringVar(&cfg.socket, "socket", ipc.DefaultSocket, "Unix-domain socket path")
 	flag.StringVar(&cfg.device, "device", "", "RDMA device name; empty selects the first device")
+	flag.IntVar(&cfg.rank, "rank", -1, "daemon rank")
+	flag.IntVar(&cfg.size, "size", 0, "number of daemon ranks")
+	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
-	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "idle queue-pair heartbeat interval")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
 
@@ -34,14 +36,21 @@ func main() {
 }
 
 type config struct {
-	socket    string
-	device    string
-	slabSize  int64
-	heartbeat time.Duration
-	noRDMA    bool
+	socket      string
+	device      string
+	rank        int
+	size        int
+	coordinator string
+	slabSize    int64
+	noRDMA      bool
 }
 
 func run(ctx context.Context, cfg config) error {
+	if !cfg.noRDMA {
+		if err := cfg.validateRDMA(); err != nil {
+			return err
+		}
+	}
 	slab, err := allocator.NewSlab("", cfg.slabSize)
 	if err != nil {
 		return err
@@ -57,17 +66,38 @@ func run(ctx context.Context, cfg config) error {
 		defer hw.Close()
 	}
 
-	tracker, err := keepalive.New(cfg.heartbeat)
-	if err != nil {
-		return err
+	var transport ipc.Transport
+	var rdmaTransport *daemonTransport
+	if hw != nil {
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, hw)
+		if err != nil {
+			return err
+		}
+		defer rdmaTransport.Close()
+		transport = rdmaTransport
 	}
-	go tracker.Run(ctx)
 
-	server, err := ipc.NewServer(slab, nil)
+	server, err := ipc.NewServer(slab, transport)
 	if err != nil {
 		return err
 	}
 	return server.ListenAndServe(ctx, cfg.socket)
+}
+
+func (cfg config) validateRDMA() error {
+	if cfg.rank < 0 {
+		return fmt.Errorf("rank %d out of range", cfg.rank)
+	}
+	if cfg.size <= 0 {
+		return fmt.Errorf("size %d must be positive", cfg.size)
+	}
+	if cfg.rank >= cfg.size {
+		return fmt.Errorf("rank %d out of range for size %d", cfg.rank, cfg.size)
+	}
+	if strings.TrimSpace(cfg.coordinator) == "" {
+		return fmt.Errorf("coordinator is empty")
+	}
+	return nil
 }
 
 type hardware struct {

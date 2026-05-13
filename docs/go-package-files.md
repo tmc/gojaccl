@@ -165,8 +165,9 @@ Files:
 - `heartbeat_test.go`: idle, touch, error, and bad-input tests using fake
   senders and a fake clock.
 
-This package schedules daemon-owned keepalives. It does not know the RDMA
-queue-pair type directly; callers adapt a queue pair with a small sender.
+This package is a scheduling primitive for daemon-owned keepalives. It is not
+yet wired into `jaccld` data queue pairs because safe heartbeats require an
+RDMA write sink or a framed SEND/RECV protocol.
 
 ## `gojaccl/cmd/jaccld`
 
@@ -175,12 +176,21 @@ Package name: `main`.
 Files:
 
 - `main.go`: command flags, signal handling, shared slab creation, singleton
-  RDMA device/protection-domain/MR startup, keepalive manager startup, and IPC
-  listener startup.
+  RDMA device/protection-domain/MR startup, daemon rank validation, transport
+  injection, and IPC listener startup.
+- `transport.go`: daemon-owned RDMA point-to-point transport, side-channel
+  destination exchange, queue-pair setup, slab-offset send and recv, barrier,
+  and transport close behavior.
+- `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
+  tests.
 
 The command may be run with `-no-rdma` for local IPC development, but production
-startup must open the hardware and register the single global slab before
-serving clients.
+startup must validate `-rank`, `-size`, and `-coordinator`, open the hardware,
+register the single global slab, and connect peer daemon ranks before serving
+clients.
+
+Do not add a `-heartbeat` flag until the daemon has a safe protocol that cannot
+consume user receives or leave posted work on the data queue pair.
 
 ## Files Not To Add Yet
 

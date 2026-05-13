@@ -549,6 +549,25 @@ ok  	<module>/gojaccl/internal/reduce	0.019s
 PASS
 ok  	<module>/gojaccl/internal/tcpchan	0.074s
 
+== gojaccl/cmd/jaccld ==
+
+=== RUN   TestConfigValidateRDMA
+=== RUN   TestConfigValidateRDMA/valid
+=== RUN   TestConfigValidateRDMA/negative_rank
+=== RUN   TestConfigValidateRDMA/zero_size
+=== RUN   TestConfigValidateRDMA/rank_out_of_range
+=== RUN   TestConfigValidateRDMA/empty_coordinator
+--- PASS: TestConfigValidateRDMA (0.00s)
+    --- PASS: TestConfigValidateRDMA/valid (0.00s)
+    --- PASS: TestConfigValidateRDMA/negative_rank (0.00s)
+    --- PASS: TestConfigValidateRDMA/zero_size (0.00s)
+    --- PASS: TestConfigValidateRDMA/rank_out_of_range (0.00s)
+    --- PASS: TestConfigValidateRDMA/empty_coordinator (0.00s)
+=== RUN   TestRunNoRDMAStartsIPC
+--- PASS: TestRunNoRDMAStartsIPC (0.01s)
+PASS
+ok  	<module>/gojaccl/cmd/jaccld	0.834s
+
 == gojaccl/internal/rdma ==
 
 === RUN   TestAvailable
