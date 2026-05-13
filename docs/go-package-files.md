@@ -21,16 +21,19 @@ Implementation files:
 - `collective.go`: `Element`, `AllSum`, `AllMax`, `AllMin`, `AllGather`, slice
   length checks, and alias checks.
 - `p2p.go`: `Barrier`, `Send`, and `Recv`.
-- `backend.go`: unexported backend interface, backend selection, daemon
-  fail-fast behavior until the IPC data path is wired, and the bridge from
-  `Group` methods to internal transport packages.
+- `backend.go`: unexported backend interface, backend selection, and the bridge
+  from `Group` methods to internal transport packages.
+- `daemon_backend.go`: jaccld IPC client backend for barrier and point-to-point
+  operations, with explicit unsupported errors for daemon-backed collectives.
 - `errors.go`: error wrapping helpers and package sentinel errors, including
-  the explicit daemon-backend-not-wired error.
+  the explicit daemon-collective-not-wired error.
 
 Test and benchmark files:
 
 - `backend_test.go`: backend selection, `Available`, and backend abstraction
   tests.
+- `daemon_backend_test.go`: hardware-free daemon backend tests using an
+  in-process IPC server and fake transport.
 - `config_test.go`: environment parsing, backend selection, daemon socket, and
   configuration validation tests.
 - `group_test.go`: group construction, lifecycle, close, and operation

@@ -17,8 +17,9 @@ Close.
 Configuration is explicit. Config records the local rank, the rank-zero
 coordinator address, the rank-by-rank RDMA device matrix, and whether a valid
 ring topology should be preferred. It also records the backend mode. Empty and
-"auto" use the working direct backend today; "daemon" is reserved for the
-jaccld IPC backend and fails until the data path is wired.
+"auto" use the working direct backend today; "daemon" uses the jaccld IPC
+backend for barrier and point-to-point operations. Daemon-backed collectives
+are not wired yet.
 
 NewGroup validates the configuration, creates the side channel, initializes
 RDMA resources, and returns only after the group is ready. NewGroupFromEnv

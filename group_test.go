@@ -78,24 +78,6 @@ func TestNewGroup(t *testing.T) {
 			t.Fatalf("NewGroup error = %v, want operation and rank", err)
 		}
 	})
-	t.Run("DaemonBackendFailsFast", func(t *testing.T) {
-		called := false
-		old := backendFactory
-		backendFactory = func(context.Context, Config) (backend, error) {
-			called = true
-			return nil, nil
-		}
-		t.Cleanup(func() { backendFactory = old })
-		cfg := fakeConfig(0, 2)
-		cfg.Backend = BackendDaemon
-		_, err := NewGroup(context.Background(), cfg)
-		if !errors.Is(err, ErrDaemonBackend) {
-			t.Fatalf("NewGroup daemon backend = %v, want not implemented", err)
-		}
-		if called {
-			t.Fatal("direct backend factory called for daemon backend")
-		}
-	})
 }
 
 func TestNewGroupFromEnv(t *testing.T) {

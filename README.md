@@ -24,9 +24,9 @@ over slab offsets through an injected transport. Wiring the public collectives
 to that IPC client is a separate integration step.
 
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
-`direct` selects it intentionally. `daemon` is accepted as configuration but
-fails fast until the IPC data path is connected, so callers are not silently
-downgraded to direct RDMA ownership.
+`direct` selects it intentionally. `daemon` selects the IPC client backend for
+barrier and point-to-point operations. Daemon-backed collectives fail with a
+clear unsupported error until the transport-neutral collective layer is wired.
 
 ## Status
 

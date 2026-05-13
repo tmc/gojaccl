@@ -72,6 +72,10 @@ $ go test -v ./gojaccl/...
 --- PASS: TestAvailable (0.00s)
     --- PASS: TestAvailable/NeverPanics (0.00s)
     --- PASS: TestAvailable/FalseWhenBackendUnavailable (0.00s)
+=== RUN   TestDaemonBackendP2P
+--- PASS: TestDaemonBackendP2P (0.00s)
+=== RUN   TestDaemonBackendCollectivesUnsupported
+--- PASS: TestDaemonBackendCollectivesUnsupported (0.00s)
 === RUN   TestNewGroup
 === RUN   TestNewGroup/InvalidConfigBeforeBackend
 === RUN   TestNewGroup/ContextCanceledBeforeStart
@@ -79,7 +83,6 @@ $ go test -v ./gojaccl/...
 === RUN   TestNewGroup/FakeBackendInitializes
 === RUN   TestNewGroup/ReadyBeforeReturn
 === RUN   TestNewGroup/ErrorIncludesOperationAndRank
-=== RUN   TestNewGroup/DaemonBackendFailsFast
 --- PASS: TestNewGroup (0.01s)
     --- PASS: TestNewGroup/InvalidConfigBeforeBackend (0.00s)
     --- PASS: TestNewGroup/ContextCanceledBeforeStart (0.00s)
@@ -87,7 +90,6 @@ $ go test -v ./gojaccl/...
     --- PASS: TestNewGroup/FakeBackendInitializes (0.00s)
     --- PASS: TestNewGroup/ReadyBeforeReturn (0.00s)
     --- PASS: TestNewGroup/ErrorIncludesOperationAndRank (0.00s)
-    --- PASS: TestNewGroup/DaemonBackendFailsFast (0.00s)
 === RUN   TestNewGroupFromEnv
 === RUN   TestNewGroupFromEnv/UsesConfigFromEnv
 === RUN   TestNewGroupFromEnv/PropagatesContext

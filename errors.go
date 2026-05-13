@@ -12,8 +12,8 @@ var (
 	// ErrBusy reports that a group already has an active operation.
 	ErrBusy = errors.New("operation in progress")
 
-	// ErrDaemonBackend reports that the jaccld backend is not wired yet.
-	ErrDaemonBackend = errors.New("daemon backend not yet implemented")
+	// ErrDaemonCollective reports that daemon-backed collectives are not wired yet.
+	ErrDaemonCollective = errors.New("daemon backend collectives not yet implemented")
 )
 
 type opError struct {
