@@ -88,6 +88,16 @@ func TestDaemonTransportCollectiveValidation(t *testing.T) {
 	}
 }
 
+func TestHeartbeatAddressAllowsZeroRKey(t *testing.T) {
+	addr, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 0, HeartbeatOffset: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr != 107 {
+		t.Fatalf("heartbeat address = %d, want 107", addr)
+	}
+}
+
 func newTransportTestSlab(t *testing.T) *allocator.Slab {
 	t.Helper()
 	slab, err := allocator.NewSlab(t.TempDir(), 4096)

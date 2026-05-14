@@ -153,9 +153,6 @@ func heartbeatAddress(dst daemonDestination) (uint64, error) {
 	if dst.MRAddr == 0 {
 		return 0, fmt.Errorf("missing remote memory address")
 	}
-	if dst.RKey == 0 {
-		return 0, fmt.Errorf("missing remote memory key")
-	}
 	if dst.HeartbeatOffset < 0 {
 		return 0, fmt.Errorf("negative remote heartbeat offset %d", dst.HeartbeatOffset)
 	}
@@ -468,7 +465,7 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 	}
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
-	if conn.remoteHeartbeatAddr == 0 || conn.remoteRKey == 0 {
+	if conn.remoteHeartbeatAddr == 0 {
 		return fmt.Errorf("rank %d has no heartbeat target", peer)
 	}
 	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, conn.remoteHeartbeatAddr, conn.remoteRKey, transportWorkID(3, peer)); err != nil {
