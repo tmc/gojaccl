@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 )
 
 func TestConfigValidateRDMA(t *testing.T) {
@@ -95,7 +98,8 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	socket := t.TempDir() + "/jaccld.sock"
+	socket := fmt.Sprintf("/tmp/jaccld-nordma-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socket) })
 	errc := make(chan error, 1)
 	go func() {
 		errc <- run(ctx, config{
@@ -125,6 +129,67 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	}
 	if err := client.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), ipc.ErrNoTransport.Error()) {
 		t.Fatalf("Barrier = %v, want %q", err, ipc.ErrNoTransport)
+	}
+
+	cancel()
+	select {
+	case err := <-errc:
+		if err != nil {
+			t.Fatalf("run = %v, want nil", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("run did not stop after cancel")
+	}
+}
+
+func TestRunControlPlaneLivenessUpdatesSession(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	socket := fmt.Sprintf("/tmp/jaccld-liveness-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { _ = os.Remove(socket) })
+	errc := make(chan error, 1)
+	go func() {
+		errc <- run(ctx, config{
+			socket:               socket,
+			slabSize:             4096,
+			maxSessions:          1,
+			controlPlaneLiveness: 5 * time.Millisecond,
+			noRDMA:               true,
+		})
+	}()
+
+	client := dialUntilReady(t, socket)
+	defer client.Close()
+
+	lease, err := client.OpenSession(context.Background(), resource.SessionRequest{
+		ClientID: "client-1",
+		Peer:     resource.PeerSpec{Rank: 1},
+		Size:     16,
+		Deadline: time.Now().Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		got, err := client.LookupSession(context.Background(), lease.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.LastActivity.After(lease.LastActivity) {
+			if !got.Healthy {
+				t.Fatalf("lookup healthy = false, want true")
+			}
+			if !got.ExpiresAt.Equal(lease.ExpiresAt) {
+				t.Fatalf("lookup expiry = %s, want unchanged %s", got.ExpiresAt, lease.ExpiresAt)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("control-plane liveness did not update LastActivity; got %s want after %s", got.LastActivity, lease.LastActivity)
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	cancel()
