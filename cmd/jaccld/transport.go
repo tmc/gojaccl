@@ -27,6 +27,14 @@ const (
 	daemonReductionMin
 )
 
+const (
+	daemonWorkSend = iota + 1
+	daemonWorkRecv
+	daemonWorkWrite
+	daemonWorkHeartbeatRecv
+	daemonWorkHeartbeatSend
+)
+
 type daemonTransport struct {
 	rank int
 	size int
@@ -39,12 +47,14 @@ type daemonTransport struct {
 	heartbeatTimeout time.Duration
 	heartbeatTTL     time.Duration
 	conns            []*daemonConn
+	pollCompletion   func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error)
 }
 
 type daemonConn struct {
 	cq              *rdma.CompletionQueue
 	qp              *rdma.QueuePair
 	remoteHeartbeat daemonHeartbeatLease
+	pending         []rdma.WorkRequest
 	heartbeatWrites atomic.Uint64
 	heartbeatErrors atomic.Uint64
 	poison          atomic.Value
@@ -302,10 +312,11 @@ func (t *daemonTransport) Send(ctx context.Context, peer int, offset, length int
 	}
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
-		if err := rdma.PostSend(conn.qp, t.mr, start+off, chunk, transportWorkID(1, peer)); err != nil {
+		id := transportWorkID(daemonWorkSend, peer)
+		if err := rdma.PostSend(conn.qp, t.mr, start+off, chunk, id); err != nil {
 			return err
 		}
-		if err := t.poll(ctx, conn, 1); err != nil {
+		if err := t.pollExpected(ctx, conn, id); err != nil {
 			return err
 		}
 		t.touch(peer)
@@ -335,10 +346,11 @@ func (t *daemonTransport) Recv(ctx context.Context, peer int, offset, length int
 	}
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
-		if err := rdma.PostRecv(conn.qp, t.mr, start+off, chunk, transportWorkID(2, peer)); err != nil {
+		id := transportWorkID(daemonWorkRecv, peer)
+		if err := rdma.PostRecv(conn.qp, t.mr, start+off, chunk, id); err != nil {
 			return err
 		}
-		if err := t.poll(ctx, conn, 1); err != nil {
+		if err := t.pollExpected(ctx, conn, id); err != nil {
 			return err
 		}
 		t.touch(peer)
@@ -487,7 +499,7 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 			if err != nil {
 				return err
 			}
-			if err := rdma.PostRecv(conn.qp, t.mr, dstStart, chunk, transportWorkID(2, peer)); err != nil {
+			if err := rdma.PostRecv(conn.qp, t.mr, dstStart, chunk, transportWorkID(daemonWorkRecv, peer)); err != nil {
 				return fmt.Errorf("peer %d post recv: %w", peer, err)
 			}
 		}
@@ -495,7 +507,7 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 			if peer == t.rank || conn == nil {
 				continue
 			}
-			if err := rdma.PostSend(conn.qp, t.mr, srcStart+off, chunk, transportWorkID(1, peer)); err != nil {
+			if err := rdma.PostSend(conn.qp, t.mr, srcStart+off, chunk, transportWorkID(daemonWorkSend, peer)); err != nil {
 				return fmt.Errorf("peer %d post send: %w", peer, err)
 			}
 		}
@@ -503,7 +515,7 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 			if peer == t.rank || conn == nil {
 				continue
 			}
-			if err := t.poll(ctx, conn, 2); err != nil {
+			if err := t.pollExpected(ctx, conn, transportWorkID(daemonWorkRecv, peer), transportWorkID(daemonWorkSend, peer)); err != nil {
 				return fmt.Errorf("peer %d poll: %w", peer, err)
 			}
 			t.touch(peer)
@@ -591,7 +603,8 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 		return nil
 	}
 	defer conn.mu.Unlock()
-	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, remote.Addr, remote.RKey, transportWorkID(3, peer)); err != nil {
+	id := transportWorkID(daemonWorkWrite, peer)
+	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, remote.Addr, remote.RKey, id); err != nil {
 		conn.recordHeartbeat(peer, err)
 		return err
 	}
@@ -602,7 +615,7 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 		pollCtx, cancel = context.WithTimeout(ctx, t.heartbeatTimeout)
 		defer cancel()
 	}
-	if err := t.poll(pollCtx, conn, 1); err != nil {
+	if err := t.pollExpected(pollCtx, conn, id); err != nil {
 		conn.recordHeartbeat(peer, err)
 		return err
 	}
@@ -679,13 +692,65 @@ func (t *daemonTransport) touch(peer int) {
 	}
 }
 
-func (t *daemonTransport) poll(ctx context.Context, conn *daemonConn, n int) error {
-	for i := 0; i < n; i++ {
-		if _, err := rdma.PollCompletion(ctx, conn.cq); err != nil {
+func (t *daemonTransport) pollExpected(ctx context.Context, conn *daemonConn, ids ...uint64) error {
+	if conn == nil {
+		return fmt.Errorf("poll completion: nil connection")
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	want := make(map[uint64]int, len(ids))
+	for _, id := range ids {
+		want[id]++
+	}
+	for len(want) > 0 {
+		for id := range want {
+			for want[id] > 0 && conn.takePending(id) {
+				want[id]--
+			}
+			if want[id] == 0 {
+				delete(want, id)
+			}
+		}
+		if len(want) == 0 {
+			return nil
+		}
+		wrs, err := t.pollWork(ctx, conn)
+		if err != nil {
 			return err
+		}
+		for _, wr := range wrs {
+			if want[wr.ID] > 0 {
+				want[wr.ID]--
+				if want[wr.ID] == 0 {
+					delete(want, wr.ID)
+				}
+				continue
+			}
+			conn.pending = append(conn.pending, wr)
 		}
 	}
 	return nil
+}
+
+func (t *daemonTransport) pollWork(ctx context.Context, conn *daemonConn) ([]rdma.WorkRequest, error) {
+	if t != nil && t.pollCompletion != nil {
+		return t.pollCompletion(ctx, conn.cq)
+	}
+	return rdma.PollCompletion(ctx, conn.cq)
+}
+
+func (c *daemonConn) takePending(id uint64) bool {
+	for i, wr := range c.pending {
+		if wr.ID != id {
+			continue
+		}
+		copy(c.pending[i:], c.pending[i+1:])
+		c.pending[len(c.pending)-1] = rdma.WorkRequest{}
+		c.pending = c.pending[:len(c.pending)-1]
+		return true
+	}
+	return false
 }
 
 func (c *daemonConn) close() error {
@@ -740,6 +805,14 @@ func (c *daemonConn) poisonHeartbeat(err error) {
 
 func transportWorkID(kind, peer int) uint64 {
 	return uint64(kind<<16 | peer)
+}
+
+func transportWorkKind(id uint64) int {
+	return int(id >> 16)
+}
+
+func transportWorkPeer(id uint64) int {
+	return int(id & 0xffff)
 }
 
 func applyDaemonReduction(op int, dt reduce.DType, dst, src []byte) error {

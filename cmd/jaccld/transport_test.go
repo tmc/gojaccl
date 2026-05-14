@@ -12,6 +12,7 @@ import (
 	"github.com/tmc/gojaccl/internal/allocator"
 	"github.com/tmc/gojaccl/internal/ipc"
 	"github.com/tmc/gojaccl/internal/jaccld/resource"
+	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/reduce"
 )
 
@@ -205,6 +206,101 @@ func TestDaemonHeartbeatLeaseRDMAExpires(t *testing.T) {
 	}
 	if _, err := lease.RDMA(now.Add(time.Minute)); !errors.Is(err, resource.ErrExpired) {
 		t.Fatalf("expired RDMA = %v, want ErrExpired", err)
+	}
+}
+
+func TestDaemonTransportPollExpectedDemuxesPending(t *testing.T) {
+	sendID := transportWorkID(daemonWorkSend, 1)
+	recvID := transportWorkID(daemonWorkRecv, 1)
+	conn := &daemonConn{}
+	calls := 0
+	tp := &daemonTransport{
+		pollCompletion: func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+			calls++
+			switch calls {
+			case 1:
+				return []rdma.WorkRequest{{ID: recvID}}, nil
+			case 2:
+				return []rdma.WorkRequest{{ID: sendID}}, nil
+			default:
+				t.Fatalf("unexpected poll call %d", calls)
+				return nil, nil
+			}
+		},
+	}
+
+	if err := tp.pollExpected(context.Background(), conn, sendID); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("poll calls = %d, want 2", calls)
+	}
+	if len(conn.pending) != 1 || conn.pending[0].ID != recvID {
+		t.Fatalf("pending = %+v, want recv id %d", conn.pending, recvID)
+	}
+	if err := tp.pollExpected(context.Background(), conn, recvID); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("poll calls after pending consume = %d, want 2", calls)
+	}
+	if len(conn.pending) != 0 {
+		t.Fatalf("pending after consume = %+v, want empty", conn.pending)
+	}
+}
+
+func TestDaemonTransportPollExpectedDuplicateIDs(t *testing.T) {
+	id := transportWorkID(daemonWorkSend, 1)
+	conn := &daemonConn{}
+	calls := 0
+	tp := &daemonTransport{
+		pollCompletion: func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+			calls++
+			if calls > 2 {
+				t.Fatalf("unexpected poll call %d", calls)
+			}
+			return []rdma.WorkRequest{{ID: id}}, nil
+		},
+	}
+
+	if err := tp.pollExpected(context.Background(), conn, id, id); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("poll calls = %d, want 2", calls)
+	}
+}
+
+func TestDaemonTransportPollExpectedPropagatesError(t *testing.T) {
+	want := errors.New("poll failed")
+	tp := &daemonTransport{
+		pollCompletion: func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+			return nil, want
+		},
+	}
+	err := tp.pollExpected(context.Background(), &daemonConn{}, transportWorkID(daemonWorkSend, 1))
+	if !errors.Is(err, want) {
+		t.Fatalf("pollExpected error = %v, want %v", err, want)
+	}
+}
+
+func TestTransportWorkIDRoundTrip(t *testing.T) {
+	for _, kind := range []int{
+		daemonWorkSend,
+		daemonWorkRecv,
+		daemonWorkWrite,
+		daemonWorkHeartbeatRecv,
+		daemonWorkHeartbeatSend,
+	} {
+		for _, peer := range []int{0, 1, 65535} {
+			id := transportWorkID(kind, peer)
+			if got := transportWorkKind(id); got != kind {
+				t.Fatalf("kind(%d, %d) = %d, want %d", kind, peer, got, kind)
+			}
+			if got := transportWorkPeer(id); got != peer {
+				t.Fatalf("peer(%d, %d) = %d, want %d", kind, peer, got, peer)
+			}
+		}
 	}
 }
 
