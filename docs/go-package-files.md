@@ -207,7 +207,8 @@ Files:
   operations and waits for in-flight operations to drain before a future
   maintenance window.
 - `admission_test.go`: hardware-free tests for maintenance admission blocking,
-  context cancellation, reopening after cancellation, and collective gating.
+  context cancellation, reopening after cancellation, collective gating, and
+  side-channel maintenance barrier ordering.
 - `main.go`: command flags, signal handling, shared slab creation, bounded
   resource session store creation, provider-free control-plane liveness loop,
   singleton RDMA device/protection-domain/MR startup, daemon rank validation,
@@ -216,8 +217,8 @@ Files:
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives, completion
   demux, heartbeat MR lease exchange, gated experimental RDMA-write heartbeat
-  setup, heartbeat poison-on-error behavior, barrier, and transport close
-  behavior.
+  setup, provider-free maintenance-window barrier scaffolding, heartbeat
+  poison-on-error behavior, barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 - `transport_test.go`: hardware-free daemon collective offset and reduction

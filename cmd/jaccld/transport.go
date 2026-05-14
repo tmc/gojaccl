@@ -728,6 +728,34 @@ func (t *daemonTransport) beginMaintenance(ctx context.Context) (func(), error) 
 	return t.admission.beginMaintenance(ctx)
 }
 
+func (t *daemonTransport) beginMaintenanceWindow(ctx context.Context) (func(context.Context) error, error) {
+	if t == nil || t.side == nil {
+		return nil, fmt.Errorf("daemon maintenance: nil side channel")
+	}
+	endAdmission, err := t.beginMaintenance(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := t.side.Barrier(ctx); err != nil {
+		endAdmission()
+		return nil, fmt.Errorf("daemon maintenance pre-barrier: %w", err)
+	}
+	var once sync.Once
+	var finishErr error
+	return func(ctx context.Context) error {
+		once.Do(func() {
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			if e := t.side.Barrier(ctx); e != nil {
+				finishErr = fmt.Errorf("daemon maintenance post-barrier: %w", e)
+			}
+			endAdmission()
+		})
+		return finishErr
+	}, nil
+}
+
 func (t *daemonTransport) pollExpected(ctx context.Context, conn *daemonConn, ids ...uint64) error {
 	if conn == nil {
 		return fmt.Errorf("poll completion: nil connection")

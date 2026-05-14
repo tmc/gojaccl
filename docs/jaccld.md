@@ -158,7 +158,8 @@ lease expiry. It does not decide tensor parallelism policy.
   maintenance window.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
   transport over the registered slab, completion demux, heartbeat MR lease
-  exchange, and the gated experimental RDMA-write heartbeat hook.
+  exchange, provider-free maintenance-window barrier scaffolding, and the
+  gated experimental RDMA-write heartbeat hook.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
