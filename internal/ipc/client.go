@@ -209,6 +209,7 @@ func (c *Client) OpenSession(ctx context.Context, req resource.SessionRequest) (
 		SessionPeer: req.Peer,
 		Size:        req.Size,
 		Deadline:    req.Deadline,
+		HeartbeatMR: req.HeartbeatMR,
 		Heartbeat:   req.Heartbeat,
 	})
 	closeFDs(fds)

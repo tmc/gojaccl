@@ -55,6 +55,8 @@ type Request struct {
 	SessionPeer resource.PeerSpec `json:"session_peer,omitempty"`
 	// Deadline is the session lease expiry.
 	Deadline time.Time `json:"deadline,omitempty"`
+	// HeartbeatMR identifies a peer-owned memory window for RDMA heartbeats.
+	HeartbeatMR resource.HeartbeatMR `json:"heartbeat_mr,omitempty"`
 	// Heartbeat is an optional requested idle interval. Zero means daemon default.
 	Heartbeat time.Duration `json:"heartbeat,omitempty"`
 	// SessionID identifies a resource session lease.

@@ -105,10 +105,13 @@ func (s *Store) Open(ctx context.Context, req SessionRequest) (SessionLease, err
 		ClientID:        req.ClientID,
 		Peer:            req.Peer,
 		Window:          window,
+		HeartbeatMR:     req.HeartbeatMR,
 		QueuePair:       qp,
 		CompletionQueue: cq,
 		CreatedAt:       now,
 		ExpiresAt:       req.Deadline,
+		LastActivity:    now,
+		Healthy:         true,
 	}
 	s.leases[lease.ID] = lease
 	return lease, nil
@@ -135,9 +138,79 @@ func (s *Store) Refresh(id LeaseID, deadline time.Time) (SessionLease, error) {
 	if !ok {
 		return SessionLease{}, ErrLeaseNotFound
 	}
+	if !lease.ExpiresAt.After(now) {
+		return SessionLease{}, ErrExpired
+	}
 	lease.ExpiresAt = deadline
+	lease.LastActivity = now
+	lease.Healthy = true
 	s.leases[id] = lease
 	return lease, nil
+}
+
+// Touch records successful control-plane or data-plane activity for a lease.
+func (s *Store) Touch(id LeaseID) (SessionLease, error) {
+	now := s.now()
+	if id == 0 {
+		return SessionLease{}, fmt.Errorf("%w: lease id is zero", ErrInvalidRequest)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateReady {
+		return SessionLease{}, ErrNotReady
+	}
+	lease, ok := s.leases[id]
+	if !ok {
+		return SessionLease{}, ErrLeaseNotFound
+	}
+	if !lease.ExpiresAt.After(now) {
+		return SessionLease{}, ErrExpired
+	}
+	lease.LastActivity = now
+	lease.Healthy = true
+	s.leases[id] = lease
+	return lease, nil
+}
+
+// PulseControlPlane records provider-free liveness for all live leases.
+//
+// It does not extend deadlines and does not touch provider, queue-pair, or
+// completion-queue state.
+func (s *Store) PulseControlPlane() int {
+	now := s.now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var n int
+	for id, lease := range s.leases {
+		if !lease.ExpiresAt.After(now) {
+			continue
+		}
+		lease.LastActivity = now
+		lease.Healthy = true
+		s.leases[id] = lease
+		n++
+	}
+	return n
+}
+
+// RunControlPlaneLiveness periodically records provider-free lease liveness.
+func (s *Store) RunControlPlaneLiveness(ctx context.Context, interval time.Duration) error {
+	if interval <= 0 {
+		return fmt.Errorf("%w: liveness interval %s must be positive", ErrInvalidRequest, interval)
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			s.PulseControlPlane()
+		}
+	}
 }
 
 // Lookup reports a live session lease by ID.
@@ -223,6 +296,11 @@ func validateRequest(req SessionRequest, now time.Time) error {
 	}
 	if req.Heartbeat < 0 {
 		return fmt.Errorf("%w: heartbeat %s is negative", ErrInvalidRequest, req.Heartbeat)
+	}
+	if !req.HeartbeatMR.IsZero() {
+		if err := req.HeartbeatMR.ValidateForRDMA(); err != nil {
+			return err
+		}
 	}
 	return nil
 }

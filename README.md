@@ -71,8 +71,8 @@ Daemon-backed RDMA heartbeats are disabled by default. The current production
 path proves daemon-owned resource and data-path ownership, but not long-lived
 idle-QP keepalive safety. The experimental RDMA-write heartbeat path requires
 `-experimental-rdma-heartbeat`, a positive `-heartbeat-timeout`, and nonzero
-remote heartbeat address and rkey metadata; it fails closed when that metadata
-is missing.
+remote heartbeat address, rkey, length, and epoch metadata; it fails closed
+when that metadata is missing.
 
 ## Dependency
 
@@ -89,3 +89,4 @@ Design and validation artifacts live under `docs/`:
 - `docs/go-doc-output.txt`
 - `docs/go-test-output.txt`
 - `docs/jaccld.md`
+- `docs/jaccld-keepalive.md`

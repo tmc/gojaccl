@@ -190,11 +190,12 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 				continue
 			}
 			lease, err := s.resources.Open(ctx, resource.SessionRequest{
-				ClientID:  req.ClientID,
-				Peer:      req.SessionPeer,
-				Size:      req.Size,
-				Deadline:  req.Deadline,
-				Heartbeat: req.Heartbeat,
+				ClientID:    req.ClientID,
+				Peer:        req.SessionPeer,
+				Size:        req.Size,
+				Deadline:    req.Deadline,
+				HeartbeatMR: req.HeartbeatMR,
+				Heartbeat:   req.Heartbeat,
 			})
 			if err != nil {
 				_ = writeControl(conn, Response{Error: err.Error()}, nil)

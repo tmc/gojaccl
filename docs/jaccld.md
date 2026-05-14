@@ -83,9 +83,12 @@ closed. This path is a staging hook for a future session contract that leases a
 dedicated remote heartbeat MR window. It is not evidence that long-lived idle QP
 keepalive safety is solved.
 
-A production keepalive should either use control-plane liveness or a real
-heartbeat MR lease negotiated through the resource/session contract. It should
-not rely on Apple-provider zero rkeys.
+A production keepalive uses control-plane liveness as the default safety
+signal. The resource store records live-session activity and health without
+touching provider state, and those pulses do not extend lease expiry. An
+RDMA-write heartbeat may be armed only after the resource/session contract has
+a real `HeartbeatMR{Addr,RKey,Length,Epoch}` with nonzero address, rkey, and
+length, and epoch. It should not rely on Apple-provider zero rkeys.
 
 ## IPC Model
 
@@ -145,6 +148,8 @@ lease expiry. It does not decide tensor parallelism policy.
   passing.
 - `internal/jaccld/resource`: bounded resource session leases and provider-free
   pool interfaces.
+- `docs/jaccld-keepalive.md`: provider-free keepalive contract and heartbeat
+  MR lease rules.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions

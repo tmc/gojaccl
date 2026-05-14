@@ -33,6 +33,9 @@ func TestStoreOpenClose(t *testing.T) {
 	if lease.QueuePair == "" || lease.CompletionQueue == "" {
 		t.Fatalf("lease handles = %q %q, want non-empty", lease.QueuePair, lease.CompletionQueue)
 	}
+	if !lease.LastActivity.Equal(now) || !lease.Healthy {
+		t.Fatalf("lease liveness = %s %v, want %s true", lease.LastActivity, lease.Healthy, now)
+	}
 	if stats := store.Stats(); stats.Leases != 1 || stats.MemoryRegions.BytesInUse != 64 || stats.QueuePairs.InUse != 1 || stats.CompletionQueues.InUse != 1 {
 		t.Fatalf("stats after open = %+v, want one lease", stats)
 	}
@@ -99,6 +102,26 @@ func TestStoreRejectsBadRequests(t *testing.T) {
 			req:  SessionRequest{ClientID: "client", Peer: PeerSpec{Rank: 1}, Size: 1, Deadline: now.Add(time.Minute), Heartbeat: -time.Second},
 			want: ErrInvalidRequest,
 		},
+		{
+			name: "ZeroHeartbeatAddr",
+			req:  SessionRequest{ClientID: "client", Peer: PeerSpec{Rank: 1}, Size: 1, Deadline: now.Add(time.Minute), HeartbeatMR: HeartbeatMR{RKey: 1, Length: 1, Epoch: 1}},
+			want: ErrInvalidRequest,
+		},
+		{
+			name: "ZeroHeartbeatRKey",
+			req:  SessionRequest{ClientID: "client", Peer: PeerSpec{Rank: 1}, Size: 1, Deadline: now.Add(time.Minute), HeartbeatMR: HeartbeatMR{Addr: 1, Length: 1, Epoch: 1}},
+			want: ErrInvalidRequest,
+		},
+		{
+			name: "ZeroHeartbeatLength",
+			req:  SessionRequest{ClientID: "client", Peer: PeerSpec{Rank: 1}, Size: 1, Deadline: now.Add(time.Minute), HeartbeatMR: HeartbeatMR{Addr: 1, RKey: 1, Epoch: 1}},
+			want: ErrInvalidRequest,
+		},
+		{
+			name: "ZeroHeartbeatEpoch",
+			req:  SessionRequest{ClientID: "client", Peer: PeerSpec{Rank: 1}, Size: 1, Deadline: now.Add(time.Minute), HeartbeatMR: HeartbeatMR{Addr: 1, RKey: 1, Length: 1}},
+			want: ErrInvalidRequest,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,6 +138,59 @@ func TestStoreRejectsBadRequests(t *testing.T) {
 				t.Fatalf("stats after rejected request = %+v, want empty", stats)
 			}
 		})
+	}
+}
+
+func TestHeartbeatMRValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		mr   HeartbeatMR
+		want error
+	}{
+		{name: "Valid", mr: testHeartbeatMR(), want: nil},
+		{name: "ZeroAddr", mr: HeartbeatMR{RKey: 2, Length: 1, Epoch: 1}, want: ErrInvalidRequest},
+		{name: "ZeroRKey", mr: HeartbeatMR{Addr: 1, Length: 1, Epoch: 1}, want: ErrInvalidRequest},
+		{name: "ZeroLength", mr: HeartbeatMR{Addr: 1, RKey: 2, Epoch: 1}, want: ErrInvalidRequest},
+		{name: "NegativeLength", mr: HeartbeatMR{Addr: 1, RKey: 2, Length: -1, Epoch: 1}, want: ErrInvalidRequest},
+		{name: "ZeroEpoch", mr: HeartbeatMR{Addr: 1, RKey: 2, Length: 1}, want: ErrInvalidRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.mr.ValidateForRDMA()
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("ValidateForRDMA = %v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestStoreHeartbeatMRLease(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	hb := testHeartbeatMR()
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID:    "client",
+		Peer:        PeerSpec{Rank: 1},
+		Size:        8,
+		Deadline:    now.Add(time.Minute),
+		HeartbeatMR: hb,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := lease.RDMAHeartbeatMR(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != hb {
+		t.Fatalf("RDMAHeartbeatMR = %+v, want %+v", got, hb)
+	}
+	if _, err := lease.RDMAHeartbeatMR(now.Add(time.Minute)); !errors.Is(err, ErrExpired) {
+		t.Fatalf("expired RDMAHeartbeatMR = %v, want ErrExpired", err)
 	}
 }
 
@@ -192,20 +268,157 @@ func TestStoreRefresh(t *testing.T) {
 		ClientID: "client",
 		Peer:     PeerSpec{Rank: 1},
 		Size:     8,
+		Deadline: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(5 * time.Second)
+	refreshed, err := store.Refresh(lease.ID, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !refreshed.ExpiresAt.Equal(now.Add(2 * time.Minute)) {
+		t.Fatalf("refreshed deadline = %s, want %s", refreshed.ExpiresAt, now.Add(2*time.Minute))
+	}
+	if !refreshed.LastActivity.Equal(now) || !refreshed.Healthy {
+		t.Fatalf("refreshed liveness = %s %v, want %s true", refreshed.LastActivity, refreshed.Healthy, now)
+	}
+	if _, err := store.Refresh(lease.ID, now); !errors.Is(err, ErrExpired) {
+		t.Fatalf("Refresh expired = %v, want ErrExpired", err)
+	}
+}
+
+func TestStoreRefreshExpiredLeaseFails(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID: "client",
+		Peer:     PeerSpec{Rank: 1},
+		Size:     8,
 		Deadline: now.Add(time.Second),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshed, err := store.Refresh(lease.ID, now.Add(time.Minute))
+	now = now.Add(2 * time.Second)
+	if _, err := store.Refresh(lease.ID, now.Add(time.Minute)); !errors.Is(err, ErrExpired) {
+		t.Fatalf("Refresh expired lease = %v, want ErrExpired", err)
+	}
+}
+
+func TestStoreTouch(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID: "client",
+		Peer:     PeerSpec{Rank: 1},
+		Size:     8,
+		Deadline: now.Add(time.Minute),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !refreshed.ExpiresAt.Equal(now.Add(time.Minute)) {
-		t.Fatalf("refreshed deadline = %s, want %s", refreshed.ExpiresAt, now.Add(time.Minute))
+	now = now.Add(time.Second)
+	touched, err := store.Touch(lease.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := store.Refresh(lease.ID, now); !errors.Is(err, ErrExpired) {
-		t.Fatalf("Refresh expired = %v, want ErrExpired", err)
+	if !touched.LastActivity.Equal(now) || !touched.ExpiresAt.Equal(lease.ExpiresAt) {
+		t.Fatalf("Touch = last %s expiry %s, want last %s expiry %s", touched.LastActivity, touched.ExpiresAt, now, lease.ExpiresAt)
+	}
+}
+
+func TestStoreControlPlaneLivenessDoesNotRefreshExpiry(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID: "client",
+		Peer:     PeerSpec{Rank: 1},
+		Size:     8,
+		Deadline: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(500 * time.Millisecond)
+	if n := store.PulseControlPlane(); n != 1 {
+		t.Fatalf("PulseControlPlane = %d, want 1", n)
+	}
+	pulsed, ok := store.Lookup(lease.ID)
+	if !ok {
+		t.Fatal("lease disappeared")
+	}
+	if !pulsed.LastActivity.Equal(now) {
+		t.Fatalf("last activity = %s, want %s", pulsed.LastActivity, now)
+	}
+	if !pulsed.ExpiresAt.Equal(lease.ExpiresAt) {
+		t.Fatalf("expiry = %s, want unchanged %s", pulsed.ExpiresAt, lease.ExpiresAt)
+	}
+	now = now.Add(time.Second)
+	if n := store.PulseControlPlane(); n != 0 {
+		t.Fatalf("PulseControlPlane after expiry = %d, want 0", n)
+	}
+	if _, err := store.Touch(lease.ID); !errors.Is(err, ErrExpired) {
+		t.Fatalf("Touch expired = %v, want ErrExpired", err)
+	}
+}
+
+func TestStoreRunControlPlaneLiveness(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID: "client",
+		Peer:     PeerSpec{Rank: 1},
+		Size:     8,
+		Deadline: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RunControlPlaneLiveness(context.Background(), 0); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("RunControlPlaneLiveness zero interval = %v, want ErrInvalidRequest", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	now = now.Add(time.Second)
+	go func() {
+		done <- store.RunControlPlaneLiveness(ctx, time.Millisecond)
+	}()
+	deadline := time.After(time.Second)
+	for {
+		got, ok := store.Lookup(lease.ID)
+		if !ok {
+			t.Fatal("lease disappeared")
+		}
+		if got.LastActivity.Equal(now) {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("liveness did not update last activity; got %s want %s", got.LastActivity, now)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunControlPlaneLiveness = %v, want context.Canceled", err)
 	}
 }
 
@@ -219,6 +432,10 @@ func TestStoreStateTransitions(t *testing.T) {
 	if err := store.SetState(StateReady); !errors.Is(err, ErrInvalidState) {
 		t.Fatalf("SetState after terminated = %v, want ErrInvalidState", err)
 	}
+}
+
+func testHeartbeatMR() HeartbeatMR {
+	return HeartbeatMR{Addr: 1, RKey: 2, Length: 1, Epoch: 1}
 }
 
 type testPools struct {

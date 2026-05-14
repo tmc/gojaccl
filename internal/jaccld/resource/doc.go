@@ -8,4 +8,8 @@
 // windows, queue-pair handles, and daemon state without importing the RDMA
 // transport implementation. Hardware-backed pools can implement these
 // interfaces later, after daemon startup has created the bounded resources.
+//
+// Control-plane liveness updates lease health without extending expiry.
+// RDMA heartbeat metadata is only a contract: it must name a real remote memory
+// window before transport code can arm a heartbeat.
 package resource

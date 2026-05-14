@@ -174,17 +174,22 @@ func TestClientSessionLifecycle(t *testing.T) {
 	defer client.Close()
 
 	deadline := time.Now().Add(time.Minute)
+	hb := resource.HeartbeatMR{Addr: 1, RKey: 2, Length: 1, Epoch: 1}
 	lease, err := client.OpenSession(context.Background(), resource.SessionRequest{
-		ClientID: "client-1",
-		Peer:     resource.PeerSpec{Rank: 1},
-		Size:     16,
-		Deadline: deadline,
+		ClientID:    "client-1",
+		Peer:        resource.PeerSpec{Rank: 1},
+		Size:        16,
+		Deadline:    deadline,
+		HeartbeatMR: hb,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lease.ID == 0 || lease.Window.Offset != 0 || lease.Window.Length != 16 {
 		t.Fatalf("session lease = %+v, want id and 16-byte window", lease)
+	}
+	if lease.HeartbeatMR != hb {
+		t.Fatalf("heartbeat MR = %+v, want %+v", lease.HeartbeatMR, hb)
 	}
 	stats, err := client.ResourceStats(context.Background())
 	if err != nil {

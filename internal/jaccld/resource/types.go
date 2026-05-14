@@ -63,6 +63,40 @@ type RemoteMemory struct {
 	RKey uint32 `json:"rkey"`
 }
 
+// HeartbeatMR identifies a peer memory window reserved for RDMA heartbeats.
+//
+// It is metadata only. The resource package does not register memory or post
+// work requests; it only records the contract that must be satisfied before an
+// RDMA heartbeat can be armed.
+type HeartbeatMR struct {
+	Addr   uint64 `json:"addr"`
+	RKey   uint32 `json:"rkey"`
+	Length int64  `json:"length"`
+	Epoch  uint64 `json:"epoch"`
+}
+
+// IsZero reports whether h carries no heartbeat memory contract.
+func (h HeartbeatMR) IsZero() bool {
+	return h == HeartbeatMR{}
+}
+
+// ValidateForRDMA reports whether h is safe to use for an RDMA heartbeat.
+func (h HeartbeatMR) ValidateForRDMA() error {
+	if h.Addr == 0 {
+		return fmt.Errorf("%w: heartbeat memory address is zero", ErrInvalidRequest)
+	}
+	if h.RKey == 0 {
+		return fmt.Errorf("%w: heartbeat memory rkey is zero", ErrInvalidRequest)
+	}
+	if h.Length <= 0 {
+		return fmt.Errorf("%w: heartbeat memory length %d must be positive", ErrInvalidRequest, h.Length)
+	}
+	if h.Epoch == 0 {
+		return fmt.Errorf("%w: heartbeat memory epoch is zero", ErrInvalidRequest)
+	}
+	return nil
+}
+
 // PeerSpec describes a formed peer route without importing a provider package.
 type PeerSpec struct {
 	Rank                 int          `json:"rank"`
@@ -83,10 +117,11 @@ type MRWindow struct {
 
 // SessionRequest asks jaccld for bounded resources for one client session.
 type SessionRequest struct {
-	ClientID string    `json:"client_id"`
-	Peer     PeerSpec  `json:"peer"`
-	Size     int64     `json:"size"`
-	Deadline time.Time `json:"deadline"`
+	ClientID    string      `json:"client_id"`
+	Peer        PeerSpec    `json:"peer"`
+	Size        int64       `json:"size"`
+	Deadline    time.Time   `json:"deadline"`
+	HeartbeatMR HeartbeatMR `json:"heartbeat_mr,omitempty"`
 	// Heartbeat is an optional requested idle interval. Zero means the
 	// daemon default; negative values are invalid.
 	Heartbeat time.Duration `json:"heartbeat,omitempty"`
@@ -98,10 +133,30 @@ type SessionLease struct {
 	ClientID        string                `json:"client_id"`
 	Peer            PeerSpec              `json:"peer"`
 	Window          MRWindow              `json:"window"`
+	HeartbeatMR     HeartbeatMR           `json:"heartbeat_mr,omitempty"`
 	QueuePair       QueuePairHandle       `json:"queue_pair"`
 	CompletionQueue CompletionQueueHandle `json:"completion_queue"`
 	CreatedAt       time.Time             `json:"created_at"`
 	ExpiresAt       time.Time             `json:"expires_at"`
+	LastActivity    time.Time             `json:"last_activity"`
+	Healthy         bool                  `json:"healthy"`
+}
+
+// RDMAHeartbeatMR returns the heartbeat memory contract for a live lease.
+func (l SessionLease) RDMAHeartbeatMR(now time.Time) (HeartbeatMR, error) {
+	if l.ID == 0 {
+		return HeartbeatMR{}, fmt.Errorf("%w: lease id is zero", ErrInvalidRequest)
+	}
+	if l.ExpiresAt.IsZero() {
+		return HeartbeatMR{}, fmt.Errorf("%w: lease deadline is zero", ErrInvalidRequest)
+	}
+	if !l.ExpiresAt.After(now) {
+		return HeartbeatMR{}, ErrExpired
+	}
+	if err := l.HeartbeatMR.ValidateForRDMA(); err != nil {
+		return HeartbeatMR{}, err
+	}
+	return l.HeartbeatMR, nil
 }
 
 // Stats reports resource store and pool use.

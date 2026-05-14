@@ -169,12 +169,12 @@ Files:
 - `pool.go`: provider-free MR, queue-pair, and completion-queue pool
   interfaces.
 - `store.go`: session lease store, state transitions, open, refresh, close,
-  expiry, cleanup, and stats.
+  provider-free liveness, expiry, cleanup, and stats.
 - `slab.go`: allocator-backed MR window pool.
 - `handle.go`: bounded static queue-pair and completion-queue handle pools for
   offline session accounting.
-- `store_test.go`: lease lifecycle, state, validation, exhaustion, refresh, and
-  expiry tests.
+- `store_test.go`: lease lifecycle, state, validation, heartbeat MR fail-closed
+  checks, exhaustion, liveness, refresh, and expiry tests.
 - `pool_test.go`: slab-backed MR and static-handle pool tests.
 - `static_test.go`: import and symbol guard preventing provider calls from
   entering the resource package.
@@ -223,7 +223,15 @@ clients.
 
 Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
 peer receives and is not safe on the raw data queue pair. Do not enable
-RDMA-write heartbeats without a real nonzero remote heartbeat address and rkey.
+RDMA-write heartbeats without a real nonzero remote heartbeat address, rkey,
+length, and epoch.
+
+## Design Notes
+
+- `docs/jaccld.md`: daemon process model, IPC protocol, and resource ownership
+  constraints.
+- `docs/jaccld-keepalive.md`: provider-free liveness contract and heartbeat MR
+  lease requirements.
 
 ## Files Not To Add Yet
 
