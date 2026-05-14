@@ -145,9 +145,9 @@ Files:
   operations including live session lookup.
 - `server.go`: Unix-domain socket server, `alloc`, `free`, `map`, `stats`, and
   `SCM_RIGHTS` file descriptor passing, resource session lifecycle dispatch,
-  plus data-path dispatch through an injected `Transport`.
-- `client.go`: local daemon client, slab mapping, data-path requests, and
-  resource session requests including liveness lookup.
+  plus data-path and maintenance dispatch through injected transports.
+- `client.go`: local daemon client, slab mapping, data-path and maintenance
+  requests, and resource session requests including liveness lookup.
 - `ipc_test.go`: hardware-free UDS, FD-passing, mmap, disconnect cleanup,
   transport dispatch, resource session cleanup, lease-bound range validation,
   and missing-transport tests.
@@ -228,6 +228,15 @@ The command may be run with `-no-rdma` for local IPC development, but production
 startup must validate `-rank`, `-size`, and `-coordinator`, open the hardware,
 register the single global slab, and connect peer daemon ranks before serving
 clients.
+
+## `gojaccl/cmd/jacclctl`
+
+Package name: `main`.
+
+Files:
+
+- `main.go`: small operator control command for explicit `maintain` requests
+  over the jaccld Unix-domain socket.
 
 Do not use background SEND heartbeats on the data queue pair. Receive matching
 is remote FIFO, and WR IDs cannot prevent heartbeat/user cross-matches.

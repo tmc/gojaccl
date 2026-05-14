@@ -129,6 +129,22 @@ func TestClientSendRecvBarrier(t *testing.T) {
 	}
 }
 
+func TestClientMaintain(t *testing.T) {
+	tr := newFakeTransport()
+	_, client, _, cleanup := startTestServerWithTransport(t, 64, tr)
+	defer cleanup()
+	defer client.Close()
+
+	if err := client.Maintain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := tr.calls()
+	want := []transportCall{{op: opMaintain}}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("transport calls = %+v, want %+v", got, want)
+	}
+}
+
 func TestClientSendRecvErrors(t *testing.T) {
 	tr := newFakeTransport()
 	tr.err = errors.New("transport down")
@@ -165,6 +181,9 @@ func TestClientDataOpsNeedTransport(t *testing.T) {
 	}
 	if err := client.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), ErrNoTransport.Error()) {
 		t.Fatalf("Barrier without transport = %v, want ErrNoTransport", err)
+	}
+	if err := client.Maintain(context.Background()); err == nil || !strings.Contains(err.Error(), ErrNoTransport.Error()) {
+		t.Fatalf("Maintain without transport = %v, want ErrNoTransport", err)
 	}
 }
 
@@ -622,6 +641,11 @@ func newFakeTransport() *fakeTransport {
 func (f *fakeTransport) Barrier(context.Context) error {
 	f.record(transportCall{op: opBarrier})
 	return f.err
+}
+
+func (f *fakeTransport) Maintain(ctx context.Context) error {
+	f.record(transportCall{op: opMaintain})
+	return f.finish(ctx)
 }
 
 func (f *fakeTransport) Send(_ context.Context, peer int, offset, length int64) error {

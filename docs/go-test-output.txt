@@ -312,6 +312,8 @@ ok  	<module>/gojaccl/internal/allocator	0.020s
 --- PASS: TestClientReportsServerErrors (0.00s)
 === RUN   TestClientSendRecvBarrier
 --- PASS: TestClientSendRecvBarrier (0.00s)
+=== RUN   TestClientMaintain
+--- PASS: TestClientMaintain (0.00s)
 === RUN   TestClientSendRecvErrors
 --- PASS: TestClientSendRecvErrors (0.00s)
 === RUN   TestClientDataOpsNeedTransport
@@ -588,6 +590,10 @@ ok  	<module>/gojaccl/internal/reduce	0.019s
 PASS
 ok  	<module>/gojaccl/internal/tcpchan	0.074s
 
+== gojaccl/cmd/jacclctl ==
+
+?   	<module>/gojaccl/cmd/jacclctl	[no test files]
+
 == gojaccl/cmd/jaccld ==
 
 === RUN   TestAdmissionGateMaintenanceWaitsForInFlight
@@ -604,6 +610,13 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 --- PASS: TestDaemonTransportMaintenanceBlocksBarrier (0.03s)
 === RUN   TestDaemonTransportMaintenanceWindowUsesSideBarriers
 --- PASS: TestDaemonTransportMaintenanceWindowUsesSideBarriers (0.05s)
+=== RUN   TestDaemonTransportMaintainPostsDataQPWork
+2026/05/14 00:39:25 jaccld maintenance peer=1 ok=true ops=1
+2026/05/14 00:39:25 jaccld maintenance peer=0 ok=true ops=1
+--- PASS: TestDaemonTransportMaintainPostsDataQPWork (0.01s)
+=== RUN   TestDaemonTransportMaintainPoisonsUnexpectedCompletion
+2026/05/14 00:39:25 jaccld maintenance peer=1 ok=false errors=1 err=peer 1 maintenance poll: unexpected maintenance completion id 65537 kind 1 peer 1
+--- PASS: TestDaemonTransportMaintainPoisonsUnexpectedCompletion (0.00s)
 === RUN   TestConfigValidateRDMA
 === RUN   TestConfigValidateRDMA/valid
 === RUN   TestConfigValidateRDMA/valid_experimental_heartbeat

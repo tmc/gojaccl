@@ -72,6 +72,13 @@ func (c *Client) Barrier(ctx context.Context) error {
 	return err
 }
 
+// Maintain asks the daemon transport to run a maintenance operation.
+func (c *Client) Maintain(ctx context.Context) error {
+	_, fds, err := c.do(ctx, Request{Op: opMaintain})
+	closeFDs(fds)
+	return err
+}
+
 // Send asks the daemon to send a slab range to peer.
 //
 // The lease value may describe a subrange of the original allocation by keeping

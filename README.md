@@ -22,7 +22,9 @@ process and serves local clients over a Unix-domain socket. The daemon IPC
 protocol leases and maps the slab, exposes explicit resource session leases,
 then asks the daemon-owned RDMA transport to send, receive, or synchronize over
 slab offsets. Daemon-backed collectives submit asynchronous work and wait for
-completion over the same control connection.
+completion over the same control connection. The IPC surface also has an
+explicit maintenance request for the gated data-QP maintenance operation; it is
+not a background keepalive.
 
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
 `direct` selects it intentionally. `daemon` selects the IPC client backend for
@@ -58,6 +60,13 @@ A daemon rank is started with explicit rank metadata:
 
 ```sh
 jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
+```
+
+An operator can trigger the explicit maintenance operation through the daemon
+socket:
+
+```sh
+jacclctl -socket /tmp/jaccld.sock maintain
 ```
 
 Daemon-backed integration tests use the same `TestIntegrationChild` helper as

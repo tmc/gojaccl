@@ -116,6 +116,8 @@ protocol is intentionally small:
 - `recv`: ask the daemon transport to receive a peer transfer into a leased
   slab range.
 - `barrier`: ask the daemon transport to synchronize active peers.
+- `maintain`: ask the daemon transport to run the explicit data-QP maintenance
+  operation.
 - `session_open`: lease a daemon-owned logical MR window and route handles.
 - `session_refresh`: extend a session lease deadline.
 - `session_lookup`: return current live session lease metadata, including
@@ -155,6 +157,8 @@ lease expiry. It does not decide tensor parallelism policy.
 
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
+- `cmd/jacclctl/main.go`: operator control command for explicit daemon
+  maintenance requests.
 - `cmd/jaccld/admission.go`: provider-free admission gate used to stop new
   daemon data operations and wait for in-flight work before a future
   maintenance window.

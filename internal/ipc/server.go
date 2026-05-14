@@ -29,6 +29,11 @@ type Transport interface {
 	Recv(context.Context, int, int64, int64) error
 }
 
+// MaintenanceTransport performs daemon-owned data-QP maintenance work.
+type MaintenanceTransport interface {
+	Maintain(context.Context) error
+}
+
 // CollectiveTransport performs daemon-owned asynchronous collective work.
 type CollectiveTransport interface {
 	AllReduce(context.Context, int, int, int64, int64, int64, int64) error
@@ -171,6 +176,17 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 			_ = writeControl(conn, Response{OK: true}, nil)
 		case opBarrier:
 			if err := s.transport.Barrier(ctx); err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true}, nil)
+		case opMaintain:
+			mt, ok := s.transport.(MaintenanceTransport)
+			if !ok {
+				_ = writeControl(conn, Response{Error: ErrNoTransport.Error()}, nil)
+				continue
+			}
+			if err := mt.Maintain(ctx); err != nil {
 				_ = writeControl(conn, Response{Error: err.Error()}, nil)
 				continue
 			}

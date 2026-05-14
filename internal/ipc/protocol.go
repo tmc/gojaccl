@@ -17,13 +17,14 @@ var ErrNoTransport = errors.New("jaccld transport unavailable")
 const DefaultSocket = "/tmp/jaccld.sock"
 
 const (
-	opAlloc   = "alloc"
-	opFree    = "free"
-	opMap     = "map"
-	opStats   = "stats"
-	opSend    = "send"
-	opRecv    = "recv"
-	opBarrier = "barrier"
+	opAlloc    = "alloc"
+	opFree     = "free"
+	opMap      = "map"
+	opStats    = "stats"
+	opSend     = "send"
+	opRecv     = "recv"
+	opBarrier  = "barrier"
+	opMaintain = "maintain"
 
 	// Session operations lease scarce route resources. They are separate from
 	// alloc/free, which only lease raw staging ranges in the shared slab.
