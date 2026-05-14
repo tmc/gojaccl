@@ -1,35 +1,79 @@
-# jaccld data-QP keepalive proof plan
+# jaccld data-QP maintenance proof status
 
-`jaccld` currently has a production-safe liveness model, not a proven
-production data-QP keepalive. The accepted behavior is TCP/control-plane
-liveness plus fail-closed datapath health. That keeps stale routes observable
-without posting provider work from request paths, but it does not prove that an
-idle Apple RDMA data QP remains warm.
+`jaccld` has a proven Apple Thunderbolt RDMA data-QP maintenance path for one
+explicit deployment envelope. It is not a background heartbeat and it is not a
+general topology claim.
 
-This note records what would be required to remove that limitation.
+## Accepted Claim
 
-## Current Stop Condition
+At commit `7a06b692cf2241c1c03702c3bab5ec252d4c308e`, explicit
+same-data-QP maintenance passed a two-host Apple Thunderbolt RDMA proof with:
 
-Do not claim production data-QP keepalive until one of these paths has a
-provider-safe design, implementation, review, and two-host long-idle proof:
+- RDMA pinned to `rdma_en1` on both hosts;
+- `tcpchan` carried only over SSH loopback forwards;
+- matching binaries on both hosts;
+- fresh preflight and postflight provider state;
+- pre-idle daemon-backed barrier-sum passing;
+- 45/45 maintenance rounds returning `ok=true` across a 47-minute idle window;
+- post-idle daemon-backed barrier-sum passing;
+- postflight `rdma_en1` still active;
+- no automated retry after provider, RTR, CQ, maintenance, barrier, poison, or
+  postflight failure;
+- clean daemon and tunnel cleanup.
 
-- a remote-write primitive with a real nonzero remote key for a daemon-owned
-  heartbeat byte;
-- a two-sided operation that cannot consume or satisfy application receive FIFO
-  entries;
-- a globally quiescent maintenance collective that explicitly stops user
-  traffic before posting same-QP SEND/RECV work.
+The preserved artifact is:
 
-Control-plane liveness, session lookup, and dedicated heartbeat QPs are useful
-health signals, but they are not proof that the user data QP stayed warm.
+```text
+/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z
+/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z.tar.gz
+sha256 fd36e9726440a1224fafc9890184bbbc5321c114c3390baca25c2c7d2c054c67
+```
 
-## Rejected Background Paths
+The accepted production statement is:
+
+`jaccld` provides daemon-owned RDMA resources, provider-free control-plane
+lease health, fail-closed datapath health, and explicit same-data-QP
+maintenance for the documented two-host `rdma_en1` plus SSH-forwarded
+`tcpchan` deployment.
+
+## Maintenance Operation
+
+The maintenance operation is admitted explicitly through daemon control, for
+example:
+
+```sh
+jacclctl -socket /tmp/jaccld.sock maintain
+```
+
+It must:
+
+- stop admitting new user operations on all ranks in the group;
+- wait for in-flight daemon data operations to complete;
+- hold the relevant connection locks;
+- complete a TCP side-channel pre-barrier after admission is closed and before
+  any maintenance RDMA work is posted;
+- prove there are no pending completions that could cross-match with
+  maintenance work;
+- post reserved maintenance receives and sends on the target data QPs;
+- poll with expected-completion matching;
+- complete a TCP side-channel post-barrier after RDMA maintenance completions
+  and before any rank reopens admission;
+- poison the route on any timeout, provider error, unexpected completion,
+  barrier failure, or mismatch;
+- never retry automatically after provider, RTR, CQ, poison, or postflight
+  failure.
+
+This operation reserves its own maintenance bytes from the daemon-owned
+registered slab. It must not borrow application receive FIFO capacity
+invisibly.
+
+## Rejected Paths
 
 RDMA_WRITE heartbeats are not production on the observed Apple provider. The
 daemon validates `HeartbeatMR` leases and fails closed on zero address, zero
 remote key, zero length, zero epoch, stale leases, and expiry. Physical proof
-so far shows Apple registered memory with remote key zero, so the validated
-remote-write path cannot arm.
+has shown Apple registered memory with remote key zero, so the remote-write
+path cannot be the Apple production keepalive.
 
 Asynchronous same-QP SEND/RECV heartbeats are rejected. RDMA receive matching
 is FIFO on the remote receive queue. Work request IDs are local completion
@@ -40,80 +84,20 @@ Dedicated heartbeat QPs are not a data-QP keepalive. They may prove daemon,
 provider, side-channel, or CQ polling liveness, but they do not exercise the
 application data QP that is known to go idle.
 
-## Candidate Path: Maintenance Collective
+## Remaining Exclusions
 
-A maintenance collective is the smallest remaining provider-correct direction
-that does not require a nonzero remote key. It is not a background heartbeat.
-It is an explicit operation admitted by the daemon scheduler.
+The proof does not establish:
 
-Minimum design requirements:
+- direct Go TCP control-plane production readiness over non-loopback
+  interfaces;
+- RDMA_WRITE heartbeat production readiness;
+- arbitrary `size > 2` topologies;
+- non-`rdma_en1` Thunderbolt RDMA layouts;
+- non-SSH-forwarded `tcpchan` deployments;
+- automated cluster deployment readiness.
 
-- stop admitting new user operations on all ranks in the group;
-- wait for all in-flight daemon data operations to complete;
-- hold the relevant connection locks on both endpoints;
-- complete a TCP side-channel synchronization barrier after local admission is
-  stopped and in-flight work is drained, so every peer knows all ranks are in
-  maintenance state before any RDMA maintenance payload is posted;
-- prove there are no outstanding application receives that could match the
-  maintenance send;
-- post reserved maintenance receives and sends on the target data QPs;
-- poll with expected-completion matching;
-- complete a second TCP side-channel synchronization barrier after RDMA
-  maintenance completions and before any rank reopens user admission;
-- poison the route on any timeout, provider error, unexpected completion, or
-  mismatch;
-- release locks and reopen admission only after every rank has completed the
-  maintenance operation;
-- never retry automatically after provider, RTR, CQ, or poison failure.
-
-This design must reserve its own receive slots and buffers. It must not borrow
-application receive FIFO capacity invisibly.
-
-## No-Hardware Acceptance Gates
-
-Before any hardware proof, the maintenance collective needs no-hardware tests
-for:
-
-- admission stops new user operations before maintenance begins;
-- maintenance waits for in-flight operations to drain;
-- the TCP side channel runs a barrier after local admission closes and before
-  any rank posts maintenance RDMA work;
-- the TCP side channel runs a barrier after maintenance completions and before
-  any rank reopens user admission;
-- locks are acquired in deterministic order and released on every error path;
-- expected-completion matching handles unrelated completions without losing
-  them;
-- unexpected completion, timeout, and provider error poison the route;
-- maintenance cannot run concurrently with send, receive, barrier, all-reduce,
-  or all-gather paths;
-- no request handler allocates PD, MR, QP, or CQ resources;
-- `ALLOW_RTR` and integration gates do not drift.
-
-Passing these tests only makes the implementation ready for physical proof. It
-does not prove the provider behavior.
-
-## Physical Proof Gate
-
-A successful production proof must use two physical Apple Thunderbolt RDMA
-hosts with matching binaries and fresh preflight on both hosts. The run must:
-
-- start `jaccld` on both hosts;
-- run a datapath smoke test before idle;
-- idle beyond the known failure window, at least 30 minutes and preferably
-  45-60 minutes;
-- run the maintenance operation on the data QPs during the idle period;
-- capture daemon logs and counters proving the maintenance operation touched
-  the target data QPs;
-- run a datapath smoke test after idle;
-- capture postflight provider state;
-- stop at the first provider, RTR, CQ, poison, or timeout failure without
-  automated retry.
-
-Artifacts must include exact commands, binary hashes, stdout, stderr, exit
-statuses, daemon logs, heartbeat or maintenance counters, preflight and
-postflight state, and an explicit no-retry statement.
-
-Until that artifact exists, the honest production statement remains:
-
-`jaccld` provides provider-free control-plane liveness and fail-closed datapath
-health. It does not yet provide a proven Apple RDMA data-QP keepalive.
+Direct non-loopback `tcpchan` use is intentionally fail-closed by default and
+requires both `jacclctl tcp-diagnostic` proof and `-allow-remote-tcpchan`.
+Broader topology support needs its own no-hardware review, bounded physical
+proof, preserved artifacts, and explicit acceptance before this document can
+claim it.

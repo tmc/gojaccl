@@ -253,24 +253,27 @@ supports barrier, send, recv, and daemon-supported collectives through slab
 leases. Collective IPC uses a deliberate asynchronous work model: clients submit
 work and then wait on a work ID.
 
-Daemon-backed RDMA heartbeats are disabled by default. The current daemon path
-proves daemon-owned resource and data-path ownership, not long-lived idle-QP
-keepalive safety. The experimental RDMA-write heartbeat hook is opt-in and must
-fail closed unless the peer publishes a real nonzero heartbeat address, rkey,
-length, and epoch from a live heartbeat lease. Observed Apple Thunderbolt RDMA
-registrations publish rkey zero, so RDMA-write is not the production keepalive
-path for this provider.
+Daemon-backed RDMA_WRITE heartbeats are disabled by default and are not the
+Apple Thunderbolt RDMA production path. The experimental hook is opt-in and
+must fail closed unless the peer publishes a real nonzero heartbeat address,
+rkey, length, and epoch from a live heartbeat lease. Observed Apple Thunderbolt
+RDMA registrations publish rkey zero, so RDMA_WRITE keepalive is rejected for
+this provider's production envelope.
 
-Control-plane liveness remains the default health signal, but it does not prove
-idle data-QP safety. Background same-data-QP SEND/RECV heartbeats are rejected:
-receive matching is remote FIFO, and WR IDs are local completion metadata, not
-wire tags. A remote user SEND can consume a local heartbeat RECV, and a remote
-heartbeat SEND can consume a local user RECV. Completion demux remains useful
-for normal traffic correctness after a completion is produced, but it cannot
-make receive-queue matching safe.
+Control-plane liveness remains a daemon and lease health signal, but it does
+not prove idle data-QP safety. Background same-data-QP SEND/RECV heartbeats are
+rejected: receive matching is remote FIFO, and WR IDs are local completion
+metadata, not wire tags. A remote user SEND can consume a local heartbeat RECV,
+and a remote heartbeat SEND can consume a local user RECV. Completion demux
+remains useful for normal traffic correctness after a completion is produced,
+but it cannot make receive-queue matching safe.
 
-A globally quiescent maintenance collective could run same-QP SEND/RECV traffic
-only after all ranks stop admitting user operations, hold the relevant endpoint
-locks, and prove outstanding protocol work completed. That is not a background
-keepalive. A dedicated heartbeat QP may prove daemon/provider/control-plane
-liveness, but it does not prove the user data QP stayed warm.
+The accepted data-QP path is explicit same-QP maintenance. It runs only after
+all ranks stop admitting user operations, drain active daemon operations, hold
+the relevant endpoint locks, and synchronize over TCP side-channel barriers
+before and after reserved same-QP maintenance traffic. The physically proved
+production envelope is two hosts, `rdma_en1`, SSH-forwarded loopback `tcpchan`,
+45 successful maintenance rounds over a 47-minute idle window, and passing
+pre/post daemon-backed barrier-sum. A dedicated heartbeat QP may prove
+daemon/provider/control-plane liveness, but it does not prove the user data QP
+stayed warm.

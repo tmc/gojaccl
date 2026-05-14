@@ -22,8 +22,8 @@ resource limits:
   transfer is not viable. The daemon must register one large slab and sublease
   byte ranges from it.
 - Queue pairs become unreliable after roughly 23 idle minutes. The daemon must
-  report route health conservatively; no accepted background data-QP heartbeat
-  exists for Apple Thunderbolt RDMA yet.
+  report route health conservatively and use only provider-safe maintenance
+  operations for the data QP.
 
 These constraints rule out a library-only architecture. Short-lived Python,
 MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
@@ -33,13 +33,15 @@ MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
 On startup, `jaccld`:
 
 1. Validates `-rank`, `-size`, and `-coordinator` unless `-no-rdma` is set.
+   The supported production coordinator is loopback, usually reached through
+   SSH local forwards. Non-loopback coordinators require
+   `-allow-remote-tcpchan` after a separate `jacclctl tcp-diagnostic` proof.
 2. Opens the configured RDMA device.
 3. Allocates one protection domain.
 4. Creates and registers one shared memory slab.
 5. Creates queue pairs for the other daemon ranks and exchanges destinations
    on the TCP side channel.
-6. Optionally starts experimental RDMA-write heartbeat management for active
-   queue pairs.
+6. Reserves daemon-owned maintenance bytes from the registered slab.
 7. Starts a bounded resource session store for local clients.
 8. Starts provider-free control-plane liveness pulses unless disabled.
 9. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
@@ -73,35 +75,37 @@ within the one registered memory region.
 ## Keepalive Model
 
 Apple's Thunderbolt RDMA provider requires active traffic to prevent queue-pair
-degradation after roughly 23 minutes, but daemon-backed RDMA heartbeats are not
-enabled in the production path yet. The default daemon does not post heartbeat
-work requests on the data queue pair. Successful user traffic still refreshes
-route activity so a future heartbeat policy has a clear idle signal.
+degradation after roughly 23 minutes. The production path is an explicit
+same-data-QP maintenance operation, not a background heartbeat. Maintenance
+stops admission, drains active data operations, acquires the relevant
+connection locks, runs a TCP side-channel pre-barrier, posts reserved same-QP
+SEND/RECV maintenance traffic, polls with expected-completion matching, runs a
+TCP side-channel post-barrier, and only then reopens admission.
+
+The accepted proof envelope is narrow: two physical Apple Thunderbolt RDMA
+hosts, RDMA explicitly pinned to `rdma_en1`, `tcpchan` carried over SSH
+loopback forwards, matching binaries, fresh pre/postflight provider state, no
+automated retry, and preserved artifacts under
+`/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`.
+That proof ran 45 successful maintenance rounds across a 47-minute idle window,
+then passed daemon-backed barrier-sum again with `rdma_en1` still active.
+
+Control-plane liveness remains a separate health signal. It proves daemon and
+lease reachability, not that a data QP stayed warm. Dedicated heartbeat QPs are
+also only liveness evidence unless separately proven to preserve the target
+data QP.
 
 The experimental RDMA-write heartbeat path is opt-in only with
 `-experimental-rdma-heartbeat`. It requires nonzero remote heartbeat address and
 rkey metadata, a positive `-heartbeat-timeout`, and a positive
 `-heartbeat-lease-ttl`; otherwise startup fails closed. Physical Apple provider
-artifacts have shown registered memory with remote key zero, so RDMA-write is
-not the production keepalive direction for this provider.
+artifacts have shown registered memory with remote key zero, so RDMA_WRITE
+heartbeats are rejected for Apple Thunderbolt RDMA production readiness.
 
-A production keepalive uses control-plane liveness as a health signal but not
-as proof that the data QP stayed warm. Background same-QP SEND/RECV heartbeats
-are rejected because receive matching is remote FIFO and WR IDs are local
-completion metadata, not wire tags. A remote user SEND can consume a locally
-posted heartbeat RECV, and a remote heartbeat SEND can consume a locally posted
-user RECV. Completion demux is still useful after completions arrive, but it
-does not make receive matching safe.
-
-Heartbeat failures mark the route unhealthy without tearing down the
-daemon-owned device, protection domain, or registered memory region. Any post,
-poll, timeout, or provider error poisons the route and must not start a retry
-loop. A dedicated heartbeat QP may prove daemon/provider/control-plane
-liveness, but it is not evidence that the user data QP stayed warm. The daemon
-has a gated maintenance operation that stops admission, drains active data
-operations, synchronizes over the TCP side channel, and posts same-QP SEND/RECV
-maintenance traffic. It remains unproven on Apple hardware and is not a
-background keepalive.
+Any maintenance, post, poll, timeout, barrier, or provider error poisons the
+route and must not start a retry loop. The daemon-owned device, protection
+domain, and registered memory region remain process-lifetime resources even
+when a route is marked unhealthy.
 
 ## IPC Model
 
@@ -158,7 +162,7 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jacclctl/main.go`: operator control command for explicit daemon
-  maintenance requests.
+  maintenance requests and one-shot direct TCP diagnostics.
 - `cmd/jaccld/admission.go`: provider-free admission gate used to stop new
   daemon data operations and wait for in-flight work before a future
   maintenance window.
@@ -173,8 +177,10 @@ lease expiry. It does not decide tensor parallelism policy.
   pool interfaces.
 - `docs/jaccld-keepalive.md`: provider-free keepalive contract and heartbeat
   MR lease rules.
-- `docs/jaccld-data-qp-keepalive.md`: remaining data-QP keepalive stop
-  condition, rejected paths, and proof gates.
+- `docs/jaccld-data-qp-keepalive.md`: proven data-QP maintenance envelope,
+  rejected paths, and remaining exclusions.
+- `docs/operator-runbook.md`: operator checklist for the supported
+  SSH-forwarded two-host deployment.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions
@@ -182,7 +188,9 @@ lease expiry. It does not decide tensor parallelism policy.
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
 Do not use background SEND heartbeats on the data queue pair; they can consume
-user receives. Do not enable RDMA-write heartbeats unless the remote heartbeat
-memory window has a real nonzero address and rkey. Treat dedicated heartbeat
-QPs as liveness-only unless a separate proof shows they preserve idle data-QP
-health.
+user receives. Do not treat RDMA_WRITE heartbeats as production on Apple
+Thunderbolt RDMA while the provider publishes zero remote keys. Do not run a
+non-loopback direct TCP side channel in production without an explicit
+`jacclctl tcp-diagnostic` proof and `-allow-remote-tcpchan`. Treat dedicated
+heartbeat QPs as liveness-only unless a separate proof shows they preserve idle
+data-QP health.

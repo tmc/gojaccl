@@ -62,6 +62,11 @@ A daemon rank is started with explicit rank metadata:
 jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
 ```
 
+The production control plane uses loopback `tcpchan` addresses, normally
+through SSH local forwards between hosts. Non-loopback coordinators are rejected
+unless `-allow-remote-tcpchan` is set after an explicit `jacclctl
+tcp-diagnostic` proof.
+
 An operator can trigger the explicit maintenance operation through the daemon
 socket:
 
@@ -76,16 +81,22 @@ the local daemon socket for each rank.
 `-no-rdma` starts only the IPC server and slab allocator for hardware-free
 smoke tests.
 
-Daemon-backed RDMA heartbeats are disabled by default. The current production
-path proves daemon-owned resource and data-path ownership, but not long-lived
-idle-QP keepalive safety. Apple Thunderbolt RDMA presents a two-sided
-SEND/RECV data path in practice, and observed registered memory keys have
-remote key zero. Background same-data-QP SEND/RECV heartbeats are rejected:
-receive matching is remote FIFO, and WR IDs are local completion metadata, not
-wire tags. The production behavior is TCP/control-plane liveness plus
-fail-closed datapath health until a provider-safe data-QP keepalive exists.
-The older RDMA-write heartbeat hook remains experimental and fails closed when
-the provider publishes a zero remote key.
+Daemon-backed RDMA_WRITE heartbeats are disabled by default and are not the
+production keepalive path on Apple Thunderbolt RDMA, whose observed registered
+memory has remote key zero. Background same-data-QP SEND/RECV heartbeats are
+also rejected because receive matching is remote FIFO, and WR IDs are local
+completion metadata, not wire tags.
+
+The accepted production envelope is explicit same-data-QP maintenance, not a
+background heartbeat: two Apple Thunderbolt RDMA hosts, RDMA pinned to
+`rdma_en1`, `tcpchan` carried over SSH loopback forwards, admission stopped on
+all ranks, peer locks held, side-channel pre/post barriers, and fail-closed
+route poisoning on any provider, CQ, barrier, or maintenance error. This path
+has a preserved two-host 47-minute idle proof with 45/45 maintenance rounds and
+passing pre/post daemon-backed barrier-sum. Direct Go TCP control-plane
+production readiness, RDMA_WRITE heartbeat production readiness, arbitrary
+rank counts, non-`rdma_en1` layouts, and non-SSH-forwarded deployments remain
+excluded until separately proven.
 
 ## Dependency
 
@@ -104,3 +115,4 @@ Design and validation artifacts live under `docs/`:
 - `docs/jaccld.md`
 - `docs/jaccld-keepalive.md`
 - `docs/jaccld-data-qp-keepalive.md`
+- `docs/operator-runbook.md`

@@ -3,8 +3,9 @@
 `jaccld` must keep long-lived daemon routes observable without letting a
 client request path allocate or probe RDMA resources. The production safety
 signal is control-plane liveness. Control-plane liveness proves daemon reach,
-not idle data-QP health. No background data-QP heartbeat is accepted for Apple
-Thunderbolt RDMA yet.
+not idle data-QP health. Apple Thunderbolt RDMA data-QP warmth is handled by
+an explicit same-data-QP maintenance operation in the supported proof envelope,
+not by an asynchronous background heartbeat.
 
 ## Default Signal
 
@@ -21,8 +22,8 @@ interval is one minute, and zero disables the loop.
 
 ## RDMA-Write Lease
 
-The earlier RDMA-write experiment may be armed only from an explicit heartbeat
-memory lease:
+The RDMA-write experiment may be armed only from an explicit heartbeat memory
+lease:
 
 ```go
 type HeartbeatMR struct {
@@ -51,9 +52,11 @@ arming an RDMA heartbeat. This exchange only happens when
 `-experimental-rdma-heartbeat` is enabled; the default daemon data path does
 not require a nonzero remote memory key.
 
-Apple Thunderbolt RDMA has so far published zero rkeys in physical proof
-artifacts, even when the local registration requested remote access. That means
-RDMA-write keepalive is not the production direction for this provider.
+Apple Thunderbolt RDMA has published zero rkeys in physical proof artifacts,
+even when the local registration requested remote access. That means
+RDMA_WRITE keepalive is rejected for this provider's production path. The hook
+can remain as an opt-in staging surface for future providers, but it is not a
+production Apple Thunderbolt RDMA claim.
 
 ## Rejected Background Heartbeats
 
@@ -68,19 +71,27 @@ heartbeat SEND can consume a locally posted user RECV. Either case corrupts or
 poisons the data QP. Completion demux is still useful after a completion
 arrives, but it cannot change receive-queue matching.
 
-A globally quiescent maintenance operation could make same-QP SEND/RECV traffic
-safe in theory: all ranks would have to stop admitting user operations, hold
-the relevant endpoint locks, prove all outstanding protocol sends and receives
-completed, run the heartbeat as an explicit collective, and then reopen user
-traffic. That is not a background keepalive and is outside the current slice.
+The accepted data-QP path is not asynchronous. It is a globally quiescent
+maintenance operation: all ranks stop admitting user operations, drain
+in-flight daemon operations, hold the relevant endpoint locks, run a TCP
+side-channel pre-barrier, post reserved same-data-QP maintenance SEND/RECV
+traffic, poll for expected completions, run a TCP side-channel post-barrier,
+and only then reopen user traffic. Any barrier, provider, CQ, timeout,
+unexpected completion, or poison failure is terminal for that route and must
+not trigger an automated retry loop.
 
 A dedicated heartbeat QP may be useful as daemon/provider/control-plane
 liveness, but it does not prove the user data QP stayed warm.
 
-## Deferred Work
+## Production Envelope
 
-The production behavior remains TCP/control-plane liveness plus fail-closed
-datapath health. The remaining open problem is a provider-safe way to keep the
-actual data QP warm without consuming application receive FIFO entries.
-`docs/jaccld-data-qp-keepalive.md` records the stop condition, rejected
-background paths, and proof gates for any future implementation.
+The proven Apple Thunderbolt RDMA envelope is two physical hosts, RDMA pinned
+to `rdma_en1`, SSH-forwarded loopback `tcpchan`, daemon-owned slabs and queue
+pairs, explicit same-data-QP maintenance during idle, and fail-closed route
+health. The preserved proof artifact is
+`/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`.
+
+Direct Go TCP control-plane production readiness, RDMA_WRITE heartbeat
+production readiness, arbitrary rank counts, non-`rdma_en1` devices, and
+non-SSH-forwarded deployments remain excluded until separate artifacts prove
+them.

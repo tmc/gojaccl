@@ -113,13 +113,37 @@ liveness pulses, and serves local clients through a Unix-domain socket. The
 daemon transport supports barrier, send, recv, and daemon-supported collectives
 over leased slab offsets.
 
-Daemon-backed RDMA heartbeats are disabled by default. The experimental
-RDMA-write heartbeat hook requires explicit opt-in and nonzero remote heartbeat
-address, rkey, length, epoch, and live lease metadata; Apple-provider zero
-rkeys fail closed. Background same-data-QP SEND/RECV heartbeats are rejected
-because receive matching is remote FIFO and WR IDs are local completion
-metadata, not wire tags. The default daemon path does not require a nonzero
-rkey.
+The supported production coordinator is loopback, usually over SSH local
+forwards. Non-loopback coordinators require -allow-remote-tcpchan after a
+separate jacclctl tcp-diagnostic proof.
+
+Daemon-backed RDMA_WRITE heartbeats are disabled by default and are not the
+Apple Thunderbolt RDMA production path. The accepted data-QP path is explicit
+same-QP maintenance: admission is stopped, daemon operations are drained,
+connection locks are held, TCP side-channel barriers bracket reserved same-QP
+maintenance traffic, and any provider, CQ, barrier, timeout, poison, or
+maintenance failure stops the route without retry. The proved envelope is two
+hosts, rdma_en1, SSH-forwarded loopback tcpchan, and passing pre/post
+daemon-backed smoke around a 47-minute idle window.
+
+== gojaccl/cmd/jacclctl ==
+
+$ go doc .
+package main // import "./cmd/jacclctl"
+
+Command jacclctl sends operator control requests to jaccld.
+
+The maintain subcommand asks a local daemon to run explicit same-data-QP
+maintenance:
+
+	jacclctl -socket /tmp/jaccld.sock maintain
+
+The tcp-diagnostic subcommand performs one framed Go TCP payload exchange. It
+is a preflight for any future non-loopback tcpchan deployment; it does not
+exercise RDMA or daemon IPC:
+
+	jacclctl tcp-diagnostic -listen 10.0.18.249:39000
+	jacclctl tcp-diagnostic -dial 10.0.18.249:39000
 
 == gojaccl/internal/allocator ==
 

@@ -47,6 +47,19 @@ func TestConfigValidateRDMA(t *testing.T) {
 			want: "coordinator is empty",
 		},
 		{
+			name: "remote coordinator rejected",
+			cfg:  config{rank: 0, size: 2, coordinator: "10.0.18.249:12345", heartbeat: time.Second},
+			want: `coordinator "10.0.18.249:12345" is not loopback`,
+		},
+		{
+			name: "remote coordinator explicitly allowed",
+			cfg:  config{rank: 0, size: 2, coordinator: "10.0.18.249:12345", heartbeat: time.Second, allowRemoteTCPChan: true},
+		},
+		{
+			name: "ipv6 loopback",
+			cfg:  config{rank: 0, size: 2, coordinator: "[::1]:12345", heartbeat: time.Second},
+		},
+		{
 			name: "zero heartbeat without experimental RDMA heartbeat",
 			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345"},
 		},

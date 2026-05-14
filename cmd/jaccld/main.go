@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -35,6 +36,7 @@ func main() {
 	flag.DurationVar(&cfg.heartbeatTimeout, "heartbeat-timeout", time.Second, "maximum experimental RDMA heartbeat completion wait")
 	flag.DurationVar(&cfg.heartbeatLeaseTTL, "heartbeat-lease-ttl", defaultHeartbeatLeaseTTL, "lifetime of exchanged heartbeat memory leases")
 	flag.BoolVar(&cfg.experimentalRDMAHeartbeat, "experimental-rdma-heartbeat", false, "post experimental RDMA-write heartbeats")
+	flag.BoolVar(&cfg.allowRemoteTCPChan, "allow-remote-tcpchan", false, "allow non-loopback tcpchan coordinator after direct TCP diagnostic proof")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
 
@@ -58,6 +60,7 @@ type config struct {
 	heartbeatLeaseTTL         time.Duration
 	controlPlaneLiveness      time.Duration
 	experimentalRDMAHeartbeat bool
+	allowRemoteTCPChan        bool
 	noRDMA                    bool
 }
 
@@ -208,6 +211,9 @@ func (cfg config) validateRDMA() error {
 	if strings.TrimSpace(cfg.coordinator) == "" {
 		return fmt.Errorf("coordinator is empty")
 	}
+	if !cfg.allowRemoteTCPChan && !loopbackCoordinator(cfg.coordinator) {
+		return fmt.Errorf("coordinator %q is not loopback; use SSH-forwarded tcpchan or set -allow-remote-tcpchan after tcp-diagnostic proof", cfg.coordinator)
+	}
 	if cfg.experimentalRDMAHeartbeat && cfg.heartbeat <= 0 {
 		return fmt.Errorf("heartbeat interval %s must be positive", cfg.heartbeat)
 	}
@@ -218,6 +224,15 @@ func (cfg config) validateRDMA() error {
 		return fmt.Errorf("heartbeat lease ttl %s must be positive", cfg.heartbeatLeaseTTL)
 	}
 	return nil
+}
+
+func loopbackCoordinator(addr string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(addr))
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 type hardware struct {

@@ -194,8 +194,8 @@ Files:
 
 This package schedules daemon-owned keepalives. The production daemon does not
 post RDMA-write heartbeats by default. `jaccld` uses this idle signal to decide
-when a provider-specific heartbeat policy should run, but Apple has no accepted
-background data-QP heartbeat yet.
+when a provider-specific heartbeat policy should run. Apple production uses
+explicit same-data-QP maintenance, not a background data-QP heartbeat.
 
 ## `gojaccl/cmd/jaccld`
 
@@ -212,8 +212,8 @@ Files:
 - `main.go`: command flags, signal handling, shared slab creation, bounded
   resource session store creation, provider-free control-plane liveness loop,
   singleton RDMA device/protection-domain/MR startup, daemon rank validation,
-  heartbeat lease TTL validation, transport injection, and IPC listener
-  startup.
+  loopback tcpchan validation with an explicit direct-TCP override, heartbeat
+  lease TTL validation, transport injection, and IPC listener startup.
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives, completion
   demux, heartbeat MR lease exchange, gated experimental RDMA-write heartbeat
@@ -236,15 +236,20 @@ Package name: `main`.
 Files:
 
 - `main.go`: small operator control command for explicit `maintain` requests
-  over the jaccld Unix-domain socket.
+  over the jaccld Unix-domain socket, plus one-shot `tcp-diagnostic`
+  listen/dial checks for future direct non-loopback tcpchan proof.
+
+- `main_test.go`: command validation and loopback TCP diagnostic tests.
 
 Do not use background SEND heartbeats on the data queue pair. Receive matching
 is remote FIFO, and WR IDs cannot prevent heartbeat/user cross-matches.
-RDMA-write heartbeats remain experimental and fail closed on Apple-provider zero
-rkeys. If any heartbeat post or poll fails, poison the connection and fail later
-user traffic closed rather than risking late-CQE misattribution. Dedicated
-heartbeat QPs may be useful for liveness, but not as proof that the data QP
-stayed warm.
+RDMA-write heartbeats remain experimental and are not production on
+Apple-provider zero rkeys. The accepted production data-QP path is explicit
+same-QP maintenance in the documented two-host `rdma_en1` plus SSH-forwarded
+`tcpchan` envelope. If any heartbeat or maintenance post, poll, barrier, or
+provider operation fails, poison the connection and fail later user traffic
+closed rather than retrying. Dedicated heartbeat QPs may be useful for
+liveness, but not as proof that the data QP stayed warm.
 
 ## Design Notes
 
@@ -252,6 +257,10 @@ stayed warm.
   constraints.
 - `docs/jaccld-keepalive.md`: provider-free liveness contract and heartbeat MR
   lease requirements.
+- `docs/jaccld-data-qp-keepalive.md`: accepted data-QP maintenance envelope,
+  rejected keepalive paths, and remaining exclusions.
+- `docs/operator-runbook.md`: supported operator checklist for the two-host
+  SSH-forwarded production envelope.
 
 ## Files Not To Add Yet
 

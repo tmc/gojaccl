@@ -592,7 +592,20 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 
 == gojaccl/cmd/jacclctl ==
 
-?   	<module>/gojaccl/cmd/jacclctl	[no test files]
+=== RUN   TestTCPDiagnosticLoopback
+--- PASS: TestTCPDiagnosticLoopback (0.00s)
+=== RUN   TestRunTCPDiagnosticCommandValidation
+=== RUN   TestRunTCPDiagnosticCommandValidation/missing_mode
+=== RUN   TestRunTCPDiagnosticCommandValidation/both_modes
+=== RUN   TestRunTCPDiagnosticCommandValidation/bad_timeout
+=== RUN   TestRunTCPDiagnosticCommandValidation/unexpected_argument
+--- PASS: TestRunTCPDiagnosticCommandValidation (0.00s)
+    --- PASS: TestRunTCPDiagnosticCommandValidation/missing_mode (0.00s)
+    --- PASS: TestRunTCPDiagnosticCommandValidation/both_modes (0.00s)
+    --- PASS: TestRunTCPDiagnosticCommandValidation/bad_timeout (0.00s)
+    --- PASS: TestRunTCPDiagnosticCommandValidation/unexpected_argument (0.00s)
+PASS
+ok  	<module>/gojaccl/cmd/jacclctl	0.321s
 
 == gojaccl/cmd/jaccld ==
 
@@ -636,6 +649,9 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 === RUN   TestConfigValidateRDMA/zero_size
 === RUN   TestConfigValidateRDMA/rank_out_of_range
 === RUN   TestConfigValidateRDMA/empty_coordinator
+=== RUN   TestConfigValidateRDMA/remote_coordinator_rejected
+=== RUN   TestConfigValidateRDMA/remote_coordinator_explicitly_allowed
+=== RUN   TestConfigValidateRDMA/ipv6_loopback
 === RUN   TestConfigValidateRDMA/zero_heartbeat_without_experimental_RDMA_heartbeat
 === RUN   TestConfigValidateRDMA/experimental_zero_heartbeat
 === RUN   TestConfigValidateRDMA/experimental_zero_heartbeat_timeout
@@ -647,6 +663,9 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
     --- PASS: TestConfigValidateRDMA/zero_size (0.00s)
     --- PASS: TestConfigValidateRDMA/rank_out_of_range (0.00s)
     --- PASS: TestConfigValidateRDMA/empty_coordinator (0.00s)
+    --- PASS: TestConfigValidateRDMA/remote_coordinator_rejected (0.00s)
+    --- PASS: TestConfigValidateRDMA/remote_coordinator_explicitly_allowed (0.00s)
+    --- PASS: TestConfigValidateRDMA/ipv6_loopback (0.00s)
     --- PASS: TestConfigValidateRDMA/zero_heartbeat_without_experimental_RDMA_heartbeat (0.00s)
     --- PASS: TestConfigValidateRDMA/experimental_zero_heartbeat (0.00s)
     --- PASS: TestConfigValidateRDMA/experimental_zero_heartbeat_timeout (0.00s)
