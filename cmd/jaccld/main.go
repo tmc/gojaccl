@@ -97,7 +97,7 @@ func run(ctx context.Context, cfg config) error {
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
-		rdmaTransport, err = openDaemonTransport(ctx, cfg, hw, tracker, heartbeat.Offset)
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, slab, hw, tracker, heartbeat.Offset)
 		if err != nil {
 			return err
 		}

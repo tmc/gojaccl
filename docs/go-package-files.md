@@ -204,11 +204,13 @@ Files:
   resource session store creation, singleton RDMA device/protection-domain/MR
   startup, daemon rank validation, transport injection, and IPC listener
   startup.
-- `transport.go`: daemon-owned RDMA point-to-point transport, side-channel
-  destination exchange, queue-pair setup, slab-offset send and recv,
+- `transport.go`: daemon-owned RDMA transport, side-channel destination
+  exchange, queue-pair setup, slab-offset send, recv, collectives,
   RDMA-write heartbeat setup, barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
+- `transport_test.go`: hardware-free daemon collective offset and reduction
+  tests using slab-backed copy closures instead of RDMA provider calls.
 
 The command may be run with `-no-rdma` for local IPC development, but production
 startup must validate `-rank`, `-size`, and `-coordinator`, open the hardware,
