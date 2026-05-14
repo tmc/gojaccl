@@ -611,23 +611,23 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 === RUN   TestDaemonTransportMaintenanceWindowUsesSideBarriers
 --- PASS: TestDaemonTransportMaintenanceWindowUsesSideBarriers (0.05s)
 === RUN   TestDaemonTransportMaintainPostsDataQPWork
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=true ops=1
-2026/05/14 01:17:38 jaccld maintenance peer=0 ok=true ops=1
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=true ops=1
+2026/05/14 01:25:25 jaccld maintenance peer=0 ok=true ops=1
 --- PASS: TestDaemonTransportMaintainPostsDataQPWork (0.01s)
 === RUN   TestDaemonTransportMaintainPoisonsUnexpectedCompletion
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=false errors=1 err=peer 1 maintenance poll: unexpected maintenance completion id 65537 kind 1 peer 1
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=false errors=1 err=peer 1 maintenance poll: unexpected maintenance completion id 65537 kind 1 peer 1
 --- PASS: TestDaemonTransportMaintainPoisonsUnexpectedCompletion (0.00s)
 === RUN   TestDaemonTransportMaintainRunsPostBarrierAfterFailure
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=false errors=1 err=peer 1 maintenance poll: unexpected maintenance completion id 65537 kind 1 peer 1
-2026/05/14 01:17:38 jaccld maintenance peer=0 ok=true ops=1
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=false errors=1 err=peer 1 maintenance poll: unexpected maintenance completion id 65537 kind 1 peer 1
+2026/05/14 01:25:25 jaccld maintenance peer=0 ok=true ops=1
 --- PASS: TestDaemonTransportMaintainRunsPostBarrierAfterFailure (0.01s)
 === RUN   TestDaemonTransportMaintainPoisonsPostBarrierFailure
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=true ops=1
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=false errors=1 err=daemon maintenance post-barrier: tcpchan: malformed frame: EOF
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=true ops=1
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=false errors=1 err=daemon maintenance post-barrier: tcpchan: malformed frame: EOF
 --- PASS: TestDaemonTransportMaintainPoisonsPostBarrierFailure (0.01s)
 === RUN   TestDaemonTransportMaintainPoisonsAllPeersOnPartialPost
-2026/05/14 01:17:38 jaccld maintenance peer=1 ok=false errors=1 err=peer 2 maintenance recv: post failed
-2026/05/14 01:17:38 jaccld maintenance peer=2 ok=false errors=1 err=peer 2 maintenance recv: post failed
+2026/05/14 01:25:25 jaccld maintenance peer=1 ok=false errors=1 err=peer 2 maintenance recv: post failed
+2026/05/14 01:25:25 jaccld maintenance peer=2 ok=false errors=1 err=peer 2 maintenance recv: post failed
 --- PASS: TestDaemonTransportMaintainPoisonsAllPeersOnPartialPost (0.00s)
 === RUN   TestConfigValidateRDMA
 === RUN   TestConfigValidateRDMA/valid
@@ -654,17 +654,21 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 === RUN   TestRunRejectsNegativeControlPlaneLiveness
 --- PASS: TestRunRejectsNegativeControlPlaneLiveness (0.00s)
 === RUN   TestRunNoRDMAStartsIPC
-2026/05/14 01:17:38 jaccld phase=slab start bytes=4096
-2026/05/14 01:17:38 jaccld phase=slab done bytes=4096
-2026/05/14 01:17:38 jaccld phase=resource_store done max_sessions=2
-2026/05/14 01:17:38 jaccld phase=ipc_listen start socket=/tmp/jaccld-nordma-1778746658052722000.sock
+2026/05/14 01:25:25 jaccld phase=slab start bytes=4096
+2026/05/14 01:25:25 jaccld phase=slab done bytes=4096
+2026/05/14 01:25:25 jaccld phase=resource_store done max_sessions=2
+2026/05/14 01:25:25 jaccld phase=ipc_listen start socket=/tmp/jaccld-nordma-1778747125789267000.sock
 --- PASS: TestRunNoRDMAStartsIPC (0.01s)
 === RUN   TestRunControlPlaneLivenessUpdatesSession
-2026/05/14 01:17:38 jaccld phase=slab start bytes=4096
-2026/05/14 01:17:38 jaccld phase=slab done bytes=4096
-2026/05/14 01:17:38 jaccld phase=resource_store done max_sessions=1
-2026/05/14 01:17:38 jaccld phase=ipc_listen start socket=/tmp/jaccld-liveness-1778746658063913000.sock
+2026/05/14 01:25:25 jaccld phase=slab start bytes=4096
+2026/05/14 01:25:25 jaccld phase=slab done bytes=4096
+2026/05/14 01:25:25 jaccld phase=resource_store done max_sessions=1
+2026/05/14 01:25:25 jaccld phase=ipc_listen start socket=/tmp/jaccld-liveness-1778747125801962000.sock
 --- PASS: TestRunControlPlaneLivenessUpdatesSession (0.02s)
+=== RUN   TestDaemonPhaseLogsCoverProofBoundaries
+--- PASS: TestDaemonPhaseLogsCoverProofBoundaries (0.00s)
+=== RUN   TestDaemonPhaseLogsDoNotExposeRawProviderMetadata
+--- PASS: TestDaemonPhaseLogsDoNotExposeRawProviderMetadata (0.00s)
 === RUN   TestDaemonTransportMeshReduceOffline
 --- PASS: TestDaemonTransportMeshReduceOffline (0.00s)
 === RUN   TestDaemonTransportMeshGatherOffline
