@@ -207,7 +207,8 @@ failure-path checks, but any test that drives real queue-pair readiness must
 also require a second explicit one-shot confirmation such as
 `JACCL_TEST_RDMA_ALLOW_RTR=1`. Apple Thunderbolt RDMA is a physical
 point-to-point fabric, so same-host local loopback RTR is not a valid default
-integration topology.
+integration topology. Direct `TestIntegrationChild` runs are part of the same
+manual gate; they are not a bypass around the operator confirmation.
 
 The benchmark gate should mirror `allreduce_bench.cpp` for float32 first, then
 float16 and bfloat16 once the Go type story is settled. It should report

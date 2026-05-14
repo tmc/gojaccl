@@ -40,6 +40,7 @@ func TestIntegrationChild(t *testing.T) {
 	if os.Getenv("JACCL_TEST_RDMA_CHILD") != "1" {
 		t.Skip("integration child helper")
 	}
+	requireRTRAllowed(t)
 	rank := mustAtoi(t, os.Getenv("JACCL_TEST_RANK"))
 	size := mustAtoi(t, os.Getenv("JACCL_TEST_SIZE"))
 	device := os.Getenv("JACCL_TEST_RDMA_DEVICE")
@@ -186,11 +187,16 @@ func TestIntegrationMeshFallbackWhenRingInvalid(t *testing.T) {
 
 func requireRDMAReadyToRun(t *testing.T) {
 	t.Helper()
-	if os.Getenv("JACCL_TEST_RDMA_ALLOW_RTR") != "1" {
-		t.Skip("set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR")
-	}
+	requireRTRAllowed(t)
 	if os.Getenv("JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK") != "1" {
 		t.Skip("local RTR loopback is unsafe for Apple Thunderbolt RDMA; run TestIntegrationChild once per physical host or set JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK=1 for an explicit loopback experiment")
+	}
+}
+
+func requireRTRAllowed(t *testing.T) {
+	t.Helper()
+	if os.Getenv("JACCL_TEST_RDMA_ALLOW_RTR") != "1" {
+		t.Skip("set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR")
 	}
 }
 

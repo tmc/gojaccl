@@ -47,9 +47,9 @@ JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -run '^TestIntegration' .
 ```
 
 To run a physical two-host test, start one `TestIntegrationChild` process per
-host with `JACCL_TEST_RDMA_CHILD=1`, distinct `JACCL_TEST_RANK` values, the
-same reachable `JACCL_TEST_COORDINATOR`, and each host's local
-`JACCL_TEST_RDMA_DEVICE`.
+host with `JACCL_TEST_RDMA_CHILD=1` and `JACCL_TEST_RDMA_ALLOW_RTR=1`,
+distinct `JACCL_TEST_RANK` values, the same reachable
+`JACCL_TEST_COORDINATOR`, and each host's local `JACCL_TEST_RDMA_DEVICE`.
 
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
