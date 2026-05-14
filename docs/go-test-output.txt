@@ -721,7 +721,9 @@ ok  	<module>/gojaccl/internal/rdma	0.091s
 The explicit hardware gate is a manual macOS RDMA validation path, not part of
 ordinary test runs. Discovery/failure-path checks require `JACCL_TEST_RDMA=1`.
 Tests that transition queue pairs to RTR also require
-`JACCL_TEST_RDMA_ALLOW_RTR=1`.
+`JACCL_TEST_RDMA_ALLOW_RTR=1`. Local loopback RTR is rejected unless
+`JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK=1` is also set; the normal physical path
+is one `TestIntegrationChild` process per host.
 
 $ JACCL_TEST_RDMA=1 go test -v . -run '^TestIntegration'
 
@@ -750,6 +752,14 @@ $ JACCL_TEST_RDMA=1 go test -v . -run '^TestIntegration'
 === RUN   TestIntegrationMeshFallbackWhenRingInvalid
     integration_test.go:190: set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR
 --- SKIP: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
+PASS
+ok  	github.com/tmc/gojaccl	0.241s
+
+$ JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -v . -run '^TestIntegrationTwoRankBarrierAndAllSum$'
+
+=== RUN   TestIntegrationTwoRankBarrierAndAllSum
+    integration_test.go:192: local RTR loopback is unsafe for Apple Thunderbolt RDMA; run TestIntegrationChild once per physical host or set JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK=1 for an explicit loopback experiment
+--- SKIP: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
 PASS
 ok  	github.com/tmc/gojaccl	0.241s
 

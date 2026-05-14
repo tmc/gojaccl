@@ -189,6 +189,9 @@ func requireRDMAReadyToRun(t *testing.T) {
 	if os.Getenv("JACCL_TEST_RDMA_ALLOW_RTR") != "1" {
 		t.Skip("set JACCL_TEST_RDMA_ALLOW_RTR=1 to run tests that transition queue pairs to RTR")
 	}
+	if os.Getenv("JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK") != "1" {
+		t.Skip("local RTR loopback is unsafe for Apple Thunderbolt RDMA; run TestIntegrationChild once per physical host or set JACCL_TEST_RDMA_ALLOW_LOCAL_LOOPBACK=1 for an explicit loopback experiment")
+	}
 }
 
 func runIntegrationCase(t *testing.T, size int, device string, preferRing bool, op string) {

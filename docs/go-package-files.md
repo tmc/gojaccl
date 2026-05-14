@@ -44,7 +44,8 @@ Test and benchmark files:
 - `fake_test.go`: in-memory backend used by public package tests.
 - `integration_test.go`: hardware integration tests. Safe discovery/failure
   checks require `JACCL_TEST_RDMA=1`; tests that transition queue pairs to RTR
-  also require `JACCL_TEST_RDMA_ALLOW_RTR=1`.
+  also require `JACCL_TEST_RDMA_ALLOW_RTR=1` and refuse same-host local
+  loopback unless explicitly overridden.
 - `benchmark_test.go`: benchmark entry points matching the C++ benchmark gate.
 - `example_test.go`: runnable public examples.
 

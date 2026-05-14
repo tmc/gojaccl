@@ -38,11 +38,18 @@ CGO_ENABLED=0 go test ./...
 
 Hardware RDMA tests are intentionally not part of ordinary validation on macOS.
 Tests that transition queue pairs to RTR require explicit one-shot operator
-confirmation:
+confirmation and a real physical topology. The top-level integration tests do
+not run a local loopback RTR experiment by default; Apple Thunderbolt RDMA is a
+point-to-point link between hosts, not a same-host loopback fabric.
 
 ```sh
 JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -run '^TestIntegration' .
 ```
+
+To run a physical two-host test, start one `TestIntegrationChild` process per
+host with `JACCL_TEST_RDMA_CHILD=1`, distinct `JACCL_TEST_RANK` values, the
+same reachable `JACCL_TEST_COORDINATOR`, and each host's local
+`JACCL_TEST_RDMA_DEVICE`.
 
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
