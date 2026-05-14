@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sync"
@@ -786,11 +787,13 @@ func (t *daemonTransport) Maintain(ctx context.Context) error {
 	if err := t.side.Barrier(ctx); err != nil {
 		return fmt.Errorf("daemon maintenance pre-barrier: %w", err)
 	}
-	if err := t.runMaintenanceLocked(ctx); err != nil {
-		return err
-	}
-	if err := t.side.Barrier(ctx); err != nil {
-		return fmt.Errorf("daemon maintenance post-barrier: %w", err)
+	runErr := t.runMaintenanceLocked(ctx)
+	postErr := t.side.Barrier(ctx)
+	if runErr != nil || postErr != nil {
+		if postErr != nil {
+			postErr = fmt.Errorf("daemon maintenance post-barrier: %w", postErr)
+		}
+		return errors.Join(runErr, postErr)
 	}
 	return nil
 }
@@ -805,8 +808,7 @@ func (t *daemonTransport) runMaintenanceLocked(ctx context.Context) error {
 		}
 		if len(conn.pending) != 0 {
 			err := fmt.Errorf("rank %d has %d pending completions before maintenance", peer, len(conn.pending))
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 	}
 	for peer, conn := range t.conns {
@@ -815,14 +817,12 @@ func (t *daemonTransport) runMaintenanceLocked(ctx context.Context) error {
 		}
 		_, recvOffset, err := t.maintenanceOffsets(peer)
 		if err != nil {
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 		id := transportWorkID(daemonWorkHeartbeatRecv, peer)
 		if err := t.postRecv(conn.qp, t.mr, recvOffset, 1, id); err != nil {
 			err = fmt.Errorf("peer %d maintenance recv: %w", peer, err)
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 	}
 	for peer, conn := range t.conns {
@@ -831,14 +831,12 @@ func (t *daemonTransport) runMaintenanceLocked(ctx context.Context) error {
 		}
 		sendOffset, _, err := t.maintenanceOffsets(peer)
 		if err != nil {
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 		id := transportWorkID(daemonWorkHeartbeatSend, peer)
 		if err := t.postSend(conn.qp, t.mr, sendOffset, 1, id); err != nil {
 			err = fmt.Errorf("peer %d maintenance send: %w", peer, err)
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 	}
 	for peer, conn := range t.conns {
@@ -847,13 +845,25 @@ func (t *daemonTransport) runMaintenanceLocked(ctx context.Context) error {
 		}
 		if err := t.pollMaintenanceExpected(ctx, conn, transportWorkID(daemonWorkHeartbeatRecv, peer), transportWorkID(daemonWorkHeartbeatSend, peer)); err != nil {
 			err = fmt.Errorf("peer %d maintenance poll: %w", peer, err)
-			conn.recordMaintenance(peer, err)
-			return err
+			return t.poisonMaintenance(err)
 		}
 		conn.recordMaintenance(peer, nil)
 		t.touch(peer)
 	}
 	return nil
+}
+
+func (t *daemonTransport) poisonMaintenance(err error) error {
+	if err == nil {
+		return nil
+	}
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		conn.recordMaintenance(peer, err)
+	}
+	return err
 }
 
 func (t *daemonTransport) maintenanceOffsets(peer int) (int, int, error) {

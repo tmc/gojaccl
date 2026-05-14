@@ -279,6 +279,72 @@ func TestDaemonTransportMaintainPoisonsUnexpectedCompletion(t *testing.T) {
 	}
 }
 
+func TestDaemonTransportMaintainRunsPostBarrierAfterFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	t0, t1 := newMaintenanceTransportPair(t, ctx)
+	configureMaintenanceTransport(t, t0, 1)
+	configureMaintenanceTransport(t, t1, 0)
+	t0.pollCompletion = func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+		return []rdma.WorkRequest{{ID: transportWorkID(daemonWorkSend, 1)}}, nil
+	}
+
+	errc := make(chan error, 2)
+	go func() { errc <- t0.Maintain(ctx) }()
+	go func() { errc <- t1.Maintain(ctx) }()
+
+	var gotUnexpected, gotNil bool
+	for i := 0; i < 2; i++ {
+		err := <-errc
+		switch {
+		case err == nil:
+			gotNil = true
+		case strings.Contains(err.Error(), "unexpected maintenance completion"):
+			gotUnexpected = true
+		default:
+			t.Fatalf("Maintain error = %v, want nil or unexpected completion", err)
+		}
+	}
+	if !gotUnexpected || !gotNil {
+		t.Fatalf("Maintain results unexpected=%v nil=%v, want one of each", gotUnexpected, gotNil)
+	}
+}
+
+func TestDaemonTransportMaintainPoisonsAllPeersOnPartialPost(t *testing.T) {
+	slab := newTransportTestSlab(t)
+	lease, err := slab.Alloc(maintenanceBytes(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conns := []*daemonConn{nil, &daemonConn{}, &daemonConn{}}
+	tp := &daemonTransport{
+		rank:             0,
+		size:             3,
+		slab:             slab,
+		maintenanceLease: lease,
+		conns:            conns,
+	}
+	tp.postRecvWork = func(_ *rdma.QueuePair, _ *rdma.MemoryRegion, offset, length int, id uint64) error {
+		if id == transportWorkID(daemonWorkHeartbeatRecv, 2) {
+			return errors.New("post failed")
+		}
+		return nil
+	}
+
+	err = tp.runMaintenanceLocked(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "post failed") {
+		t.Fatalf("runMaintenanceLocked = %v, want post failure", err)
+	}
+	for peer := 1; peer <= 2; peer++ {
+		if err := tp.conns[peer].checkReady(peer); err == nil || !strings.Contains(err.Error(), "post failed") {
+			t.Fatalf("peer %d checkReady = %v, want poison", peer, err)
+		}
+		if tp.conns[peer].maintenanceErrs.Load() != 1 {
+			t.Fatalf("peer %d maintenance errors = %d, want 1", peer, tp.conns[peer].maintenanceErrs.Load())
+		}
+	}
+}
+
 func newMaintenanceTransportPair(t *testing.T, ctx context.Context) (*daemonTransport, *daemonTransport) {
 	t.Helper()
 	addr := unusedTCPAddr(t)
