@@ -51,10 +51,15 @@ Minimum design requirements:
 - stop admitting new user operations on all ranks in the group;
 - wait for all in-flight daemon data operations to complete;
 - hold the relevant connection locks on both endpoints;
+- complete a TCP side-channel synchronization barrier after local admission is
+  stopped and in-flight work is drained, so every peer knows all ranks are in
+  maintenance state before any RDMA maintenance payload is posted;
 - prove there are no outstanding application receives that could match the
   maintenance send;
 - post reserved maintenance receives and sends on the target data QPs;
 - poll with expected-completion matching;
+- complete a second TCP side-channel synchronization barrier after RDMA
+  maintenance completions and before any rank reopens user admission;
 - poison the route on any timeout, provider error, unexpected completion, or
   mismatch;
 - release locks and reopen admission only after every rank has completed the
@@ -71,6 +76,10 @@ for:
 
 - admission stops new user operations before maintenance begins;
 - maintenance waits for in-flight operations to drain;
+- the TCP side channel runs a barrier after local admission closes and before
+  any rank posts maintenance RDMA work;
+- the TCP side channel runs a barrier after maintenance completions and before
+  any rank reopens user admission;
 - locks are acquired in deterministic order and released on every error path;
 - expected-completion matching handles unrelated completions without losing
   them;
