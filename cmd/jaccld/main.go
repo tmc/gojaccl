@@ -63,6 +63,16 @@ type config struct {
 
 const defaultHeartbeatLeaseTTL = 24 * time.Hour
 
+func maintenanceBytes(size int) int64 {
+	if size <= 1 {
+		return 2
+	}
+	if int64(size) > maxInt64/2 {
+		return maxInt64
+	}
+	return int64(2 * size)
+}
+
 func run(ctx context.Context, cfg config) error {
 	if cfg.controlPlaneLiveness < 0 {
 		return fmt.Errorf("control-plane liveness interval %s must be non-negative", cfg.controlPlaneLiveness)
@@ -100,9 +110,9 @@ func run(ctx context.Context, cfg config) error {
 
 	var heartbeat allocator.Lease
 	if !cfg.noRDMA {
-		heartbeat, err = slab.Alloc(1)
+		heartbeat, err = slab.Alloc(maintenanceBytes(cfg.size))
 		if err != nil {
-			return fmt.Errorf("reserve heartbeat byte: %w", err)
+			return fmt.Errorf("reserve heartbeat bytes: %w", err)
 		}
 	}
 

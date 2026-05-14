@@ -97,9 +97,11 @@ Heartbeat failures mark the route unhealthy without tearing down the
 daemon-owned device, protection domain, or registered memory region. Any post,
 poll, timeout, or provider error poisons the route and must not start a retry
 loop. A dedicated heartbeat QP may prove daemon/provider/control-plane
-liveness, but it is not evidence that the user data QP stayed warm. A globally
-quiescent maintenance collective could safely run same-QP SEND/RECV traffic in
-theory, but that is not a background keepalive and is outside this slice.
+liveness, but it is not evidence that the user data QP stayed warm. The daemon
+has a gated maintenance operation that stops admission, drains active data
+operations, synchronizes over the TCP side channel, and posts same-QP SEND/RECV
+maintenance traffic. It remains unproven on Apple hardware and is not a
+background keepalive.
 
 ## IPC Model
 
@@ -158,8 +160,8 @@ lease expiry. It does not decide tensor parallelism policy.
   maintenance window.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
   transport over the registered slab, completion demux, heartbeat MR lease
-  exchange, provider-free maintenance-window barrier scaffolding, and the
-  gated experimental RDMA-write heartbeat hook.
+  exchange, gated same-QP maintenance operation, and the experimental
+  RDMA-write heartbeat hook.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.

@@ -217,7 +217,7 @@ Files:
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives, completion
   demux, heartbeat MR lease exchange, gated experimental RDMA-write heartbeat
-  setup, provider-free maintenance-window barrier scaffolding, heartbeat
+  setup, gated same-QP maintenance operation, heartbeat and maintenance
   poison-on-error behavior, barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.

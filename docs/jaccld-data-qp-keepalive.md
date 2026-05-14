@@ -44,7 +44,7 @@ application data QP that is known to go idle.
 
 A maintenance collective is the smallest remaining provider-correct direction
 that does not require a nonzero remote key. It is not a background heartbeat.
-It would be an explicit operation admitted by the daemon scheduler.
+It is an explicit operation admitted by the daemon scheduler.
 
 Minimum design requirements:
 
@@ -89,8 +89,8 @@ for:
 - no request handler allocates PD, MR, QP, or CQ resources;
 - `ALLOW_RTR` and integration gates do not drift.
 
-Passing these tests would only make the design ready for review. It would not
-prove the provider behavior.
+Passing these tests only makes the implementation ready for physical proof. It
+does not prove the provider behavior.
 
 ## Physical Proof Gate
 

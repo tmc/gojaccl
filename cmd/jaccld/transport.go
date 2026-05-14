@@ -44,11 +44,14 @@ type daemonTransport struct {
 	side             *tcpchan.Channel
 	admission        *admissionGate
 	tracker          *keepalive.Tracker
+	maintenanceLease allocator.Lease
 	heartbeatLease   daemonHeartbeatLease
 	heartbeatTimeout time.Duration
 	heartbeatTTL     time.Duration
 	conns            []*daemonConn
 	pollCompletion   func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error)
+	postRecvWork     func(*rdma.QueuePair, *rdma.MemoryRegion, int, int, uint64) error
+	postSendWork     func(*rdma.QueuePair, *rdma.MemoryRegion, int, int, uint64) error
 }
 
 type daemonConn struct {
@@ -58,6 +61,8 @@ type daemonConn struct {
 	pending         []rdma.WorkRequest
 	heartbeatWrites atomic.Uint64
 	heartbeatErrors atomic.Uint64
+	maintenanceOps  atomic.Uint64
+	maintenanceErrs atomic.Uint64
 	poison          atomic.Value
 	mu              sync.Mutex
 }
@@ -96,6 +101,7 @@ func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel,
 		mr:               hw.mr,
 		tracker:          tracker,
 		admission:        newAdmissionGate(),
+		maintenanceLease: heartbeat,
 		heartbeatLease:   hb,
 		heartbeatTimeout: cfg.heartbeatTimeout,
 		heartbeatTTL:     ttl,
@@ -325,7 +331,7 @@ func (t *daemonTransport) Send(ctx context.Context, peer int, offset, length int
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
 		id := transportWorkID(daemonWorkSend, peer)
-		if err := rdma.PostSend(conn.qp, t.mr, start+off, chunk, id); err != nil {
+		if err := t.postSend(conn.qp, t.mr, start+off, chunk, id); err != nil {
 			return err
 		}
 		if err := t.pollExpected(ctx, conn, id); err != nil {
@@ -364,7 +370,7 @@ func (t *daemonTransport) Recv(ctx context.Context, peer int, offset, length int
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
 		id := transportWorkID(daemonWorkRecv, peer)
-		if err := rdma.PostRecv(conn.qp, t.mr, start+off, chunk, id); err != nil {
+		if err := t.postRecv(conn.qp, t.mr, start+off, chunk, id); err != nil {
 			return err
 		}
 		if err := t.pollExpected(ctx, conn, id); err != nil {
@@ -526,7 +532,7 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 			if err != nil {
 				return err
 			}
-			if err := rdma.PostRecv(conn.qp, t.mr, dstStart, chunk, transportWorkID(daemonWorkRecv, peer)); err != nil {
+			if err := t.postRecv(conn.qp, t.mr, dstStart, chunk, transportWorkID(daemonWorkRecv, peer)); err != nil {
 				return fmt.Errorf("peer %d post recv: %w", peer, err)
 			}
 		}
@@ -534,7 +540,7 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 			if peer == t.rank || conn == nil {
 				continue
 			}
-			if err := rdma.PostSend(conn.qp, t.mr, srcStart+off, chunk, transportWorkID(daemonWorkSend, peer)); err != nil {
+			if err := t.postSend(conn.qp, t.mr, srcStart+off, chunk, transportWorkID(daemonWorkSend, peer)); err != nil {
 				return fmt.Errorf("peer %d post send: %w", peer, err)
 			}
 		}
@@ -761,6 +767,143 @@ func (t *daemonTransport) beginMaintenanceWindow(ctx context.Context) (func(cont
 	}, nil
 }
 
+func (t *daemonTransport) Maintain(ctx context.Context) error {
+	if t == nil || t.side == nil {
+		return fmt.Errorf("daemon maintenance: nil side channel")
+	}
+	endAdmission, err := t.beginMaintenance(ctx)
+	if err != nil {
+		return err
+	}
+	defer endAdmission()
+
+	locked, err := t.lockConns()
+	if err != nil {
+		return err
+	}
+	defer unlockDaemonConns(locked)
+
+	if err := t.side.Barrier(ctx); err != nil {
+		return fmt.Errorf("daemon maintenance pre-barrier: %w", err)
+	}
+	if err := t.runMaintenanceLocked(ctx); err != nil {
+		return err
+	}
+	if err := t.side.Barrier(ctx); err != nil {
+		return fmt.Errorf("daemon maintenance post-barrier: %w", err)
+	}
+	return nil
+}
+
+func (t *daemonTransport) runMaintenanceLocked(ctx context.Context) error {
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		if err := conn.checkReady(peer); err != nil {
+			return err
+		}
+		if len(conn.pending) != 0 {
+			err := fmt.Errorf("rank %d has %d pending completions before maintenance", peer, len(conn.pending))
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+	}
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		_, recvOffset, err := t.maintenanceOffsets(peer)
+		if err != nil {
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+		id := transportWorkID(daemonWorkHeartbeatRecv, peer)
+		if err := t.postRecv(conn.qp, t.mr, recvOffset, 1, id); err != nil {
+			err = fmt.Errorf("peer %d maintenance recv: %w", peer, err)
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+	}
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		sendOffset, _, err := t.maintenanceOffsets(peer)
+		if err != nil {
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+		id := transportWorkID(daemonWorkHeartbeatSend, peer)
+		if err := t.postSend(conn.qp, t.mr, sendOffset, 1, id); err != nil {
+			err = fmt.Errorf("peer %d maintenance send: %w", peer, err)
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+	}
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		if err := t.pollMaintenanceExpected(ctx, conn, transportWorkID(daemonWorkHeartbeatRecv, peer), transportWorkID(daemonWorkHeartbeatSend, peer)); err != nil {
+			err = fmt.Errorf("peer %d maintenance poll: %w", peer, err)
+			conn.recordMaintenance(peer, err)
+			return err
+		}
+		conn.recordMaintenance(peer, nil)
+		t.touch(peer)
+	}
+	return nil
+}
+
+func (t *daemonTransport) maintenanceOffsets(peer int) (int, int, error) {
+	if t == nil {
+		return 0, 0, fmt.Errorf("daemon maintenance: nil transport")
+	}
+	if peer < 0 || peer >= t.size {
+		return 0, 0, fmt.Errorf("rank %d out of range for size %d", peer, t.size)
+	}
+	if int64(peer) > maxInt64/2 {
+		return 0, 0, fmt.Errorf("rank %d maintenance slot overflows", peer)
+	}
+	slot := int64(peer) * 2
+	if slot < 0 || slot+2 > t.maintenanceLease.Length {
+		return 0, 0, fmt.Errorf("rank %d maintenance slot outside lease [%d,%d)", peer, t.maintenanceLease.Offset, t.maintenanceLease.Offset+t.maintenanceLease.Length)
+	}
+	offset := t.maintenanceLease.Offset + slot
+	if offset < t.maintenanceLease.Offset {
+		return 0, 0, fmt.Errorf("rank %d maintenance offset overflows", peer)
+	}
+	start, _, err := t.rangeInMR(offset, 2)
+	if err != nil {
+		return 0, 0, err
+	}
+	return start, start + 1, nil
+}
+
+func (t *daemonTransport) pollMaintenanceExpected(ctx context.Context, conn *daemonConn, ids ...uint64) error {
+	want := make(map[uint64]int, len(ids))
+	for _, id := range ids {
+		want[id]++
+	}
+	for len(want) > 0 {
+		wrs, err := t.pollWork(ctx, conn)
+		if err != nil {
+			return err
+		}
+		for _, wr := range wrs {
+			if want[wr.ID] == 0 {
+				return fmt.Errorf("unexpected maintenance completion id %d kind %d peer %d", wr.ID, transportWorkKind(wr.ID), transportWorkPeer(wr.ID))
+			}
+			want[wr.ID]--
+			if want[wr.ID] == 0 {
+				delete(want, wr.ID)
+			}
+		}
+	}
+	return nil
+}
+
 func (t *daemonTransport) pollExpected(ctx context.Context, conn *daemonConn, ids ...uint64) error {
 	if conn == nil {
 		return fmt.Errorf("poll completion: nil connection")
@@ -809,6 +952,20 @@ func (t *daemonTransport) pollWork(ctx context.Context, conn *daemonConn) ([]rdm
 	return rdma.PollCompletion(ctx, conn.cq)
 }
 
+func (t *daemonTransport) postRecv(qp *rdma.QueuePair, mr *rdma.MemoryRegion, offset, length int, id uint64) error {
+	if t != nil && t.postRecvWork != nil {
+		return t.postRecvWork(qp, mr, offset, length, id)
+	}
+	return rdma.PostRecv(qp, mr, offset, length, id)
+}
+
+func (t *daemonTransport) postSend(qp *rdma.QueuePair, mr *rdma.MemoryRegion, offset, length int, id uint64) error {
+	if t != nil && t.postSendWork != nil {
+		return t.postSendWork(qp, mr, offset, length, id)
+	}
+	return rdma.PostSend(qp, mr, offset, length, id)
+}
+
 func (c *daemonConn) takePending(id uint64) bool {
 	for i, wr := range c.pending {
 		if wr.ID != id {
@@ -851,6 +1008,20 @@ func (c *daemonConn) recordHeartbeat(peer int, err error) {
 	}
 	n := c.heartbeatWrites.Add(1)
 	log.Printf("jaccld heartbeat peer=%d ok=true writes=%d", peer, n)
+}
+
+func (c *daemonConn) recordMaintenance(peer int, err error) {
+	if c == nil {
+		return
+	}
+	if err != nil {
+		c.poisonHeartbeat(err)
+		n := c.maintenanceErrs.Add(1)
+		log.Printf("jaccld maintenance peer=%d ok=false errors=%d err=%v", peer, n, err)
+		return
+	}
+	n := c.maintenanceOps.Add(1)
+	log.Printf("jaccld maintenance peer=%d ok=true ops=%d", peer, n)
 }
 
 func (c *daemonConn) checkReady(peer int) error {

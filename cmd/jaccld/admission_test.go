@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/reduce"
 	"github.com/tmc/gojaccl/internal/tcpchan"
 )
@@ -218,6 +220,65 @@ func TestDaemonTransportMaintenanceWindowUsesSideBarriers(t *testing.T) {
 	release()
 }
 
+func TestDaemonTransportMaintainPostsDataQPWork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	t0, t1 := newMaintenanceTransportPair(t, ctx)
+	calls0 := configureMaintenanceTransport(t, t0, 1)
+	calls1 := configureMaintenanceTransport(t, t1, 0)
+
+	errc := make(chan error, 2)
+	go func() { errc <- t0.Maintain(ctx) }()
+	go func() { errc <- t1.Maintain(ctx) }()
+	for i := 0; i < 2; i++ {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	want0 := []maintenanceCall{
+		{op: "recv", offset: 3, length: 1, id: transportWorkID(daemonWorkHeartbeatRecv, 1)},
+		{op: "send", offset: 2, length: 1, id: transportWorkID(daemonWorkHeartbeatSend, 1)},
+	}
+	want1 := []maintenanceCall{
+		{op: "recv", offset: 1, length: 1, id: transportWorkID(daemonWorkHeartbeatRecv, 0)},
+		{op: "send", offset: 0, length: 1, id: transportWorkID(daemonWorkHeartbeatSend, 0)},
+	}
+	if got := *calls0; !sameMaintenanceCalls(got, want0) {
+		t.Fatalf("rank 0 maintenance calls = %+v, want %+v", got, want0)
+	}
+	if got := *calls1; !sameMaintenanceCalls(got, want1) {
+		t.Fatalf("rank 1 maintenance calls = %+v, want %+v", got, want1)
+	}
+	if t0.conns[1].maintenanceOps.Load() != 1 || t1.conns[0].maintenanceOps.Load() != 1 {
+		t.Fatalf("maintenance counters rank0=%d rank1=%d, want one op each", t0.conns[1].maintenanceOps.Load(), t1.conns[0].maintenanceOps.Load())
+	}
+}
+
+func TestDaemonTransportMaintainPoisonsUnexpectedCompletion(t *testing.T) {
+	tp := newSinglePeerMaintenanceTransport(t, 0, 1)
+	tp.postRecvWork = func(*rdma.QueuePair, *rdma.MemoryRegion, int, int, uint64) error {
+		return nil
+	}
+	tp.postSendWork = func(*rdma.QueuePair, *rdma.MemoryRegion, int, int, uint64) error {
+		return nil
+	}
+	tp.pollCompletion = func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+		return []rdma.WorkRequest{{ID: transportWorkID(daemonWorkSend, 1)}}, nil
+	}
+
+	err := tp.runMaintenanceLocked(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "unexpected maintenance completion") {
+		t.Fatalf("runMaintenanceLocked = %v, want unexpected completion", err)
+	}
+	if err := tp.conns[1].checkReady(1); err == nil || !strings.Contains(err.Error(), "unexpected maintenance completion") {
+		t.Fatalf("checkReady after unexpected completion = %v, want poison", err)
+	}
+	if tp.conns[1].maintenanceErrs.Load() != 1 {
+		t.Fatalf("maintenance errors = %d, want 1", tp.conns[1].maintenanceErrs.Load())
+	}
+}
+
 func newMaintenanceTransportPair(t *testing.T, ctx context.Context) (*daemonTransport, *daemonTransport) {
 	t.Helper()
 	addr := unusedTCPAddr(t)
@@ -245,6 +306,72 @@ func newMaintenanceTransportPair(t *testing.T, ctx context.Context) (*daemonTran
 	})
 	return &daemonTransport{rank: 0, size: 2, side: res.c, admission: newAdmissionGate()},
 		&daemonTransport{rank: 1, size: 2, side: c1, admission: newAdmissionGate()}
+}
+
+type maintenanceCall struct {
+	op     string
+	offset int
+	length int
+	id     uint64
+}
+
+func configureMaintenanceTransport(t *testing.T, tp *daemonTransport, peer int) *[]maintenanceCall {
+	t.Helper()
+	slab := newTransportTestSlab(t)
+	lease, err := slab.Alloc(maintenanceBytes(tp.size))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tp.slab = slab
+	tp.maintenanceLease = lease
+	tp.conns = make([]*daemonConn, tp.size)
+	tp.conns[peer] = &daemonConn{}
+	var calls []maintenanceCall
+	tp.postRecvWork = func(_ *rdma.QueuePair, _ *rdma.MemoryRegion, offset, length int, id uint64) error {
+		calls = append(calls, maintenanceCall{op: "recv", offset: offset, length: length, id: id})
+		return nil
+	}
+	tp.postSendWork = func(_ *rdma.QueuePair, _ *rdma.MemoryRegion, offset, length int, id uint64) error {
+		calls = append(calls, maintenanceCall{op: "send", offset: offset, length: length, id: id})
+		return nil
+	}
+	tp.pollCompletion = func(context.Context, *rdma.CompletionQueue) ([]rdma.WorkRequest, error) {
+		return []rdma.WorkRequest{
+			{ID: transportWorkID(daemonWorkHeartbeatRecv, peer)},
+			{ID: transportWorkID(daemonWorkHeartbeatSend, peer)},
+		}, nil
+	}
+	return &calls
+}
+
+func newSinglePeerMaintenanceTransport(t *testing.T, rank, peer int) *daemonTransport {
+	t.Helper()
+	slab := newTransportTestSlab(t)
+	lease, err := slab.Alloc(maintenanceBytes(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conns := make([]*daemonConn, 2)
+	conns[peer] = &daemonConn{}
+	return &daemonTransport{
+		rank:             rank,
+		size:             2,
+		slab:             slab,
+		maintenanceLease: lease,
+		conns:            conns,
+	}
+}
+
+func sameMaintenanceCalls(a, b []maintenanceCall) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func unusedTCPAddr(t *testing.T) string {
