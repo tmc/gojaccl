@@ -50,7 +50,9 @@ func TestIntegrationChild(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	fmt.Fprintf(os.Stderr, "rank %d: new group op=%s device=%s coordinator=%s\n", rank, op, device, coordinator)
+	backend := os.Getenv("JACCL_BACKEND")
+	socket := os.Getenv("JACCL_DAEMON_SOCKET")
+	fmt.Fprintf(os.Stderr, "rank %d: new group op=%s device=%s coordinator=%s backend=%s socket=%s\n", rank, op, device, coordinator, backend, socket)
 	g, err := NewGroup(ctx, integrationConfig(rank, size, device, coordinator, preferRing))
 	if err != nil {
 		t.Fatal(err)
@@ -185,6 +187,15 @@ func TestIntegrationMeshFallbackWhenRingInvalid(t *testing.T) {
 	runIntegrationCase(t, 4, device, true, "barrier")
 }
 
+func TestIntegrationConfigDaemonBackendEnv(t *testing.T) {
+	t.Setenv("JACCL_BACKEND", BackendDaemon)
+	t.Setenv("JACCL_DAEMON_SOCKET", "/tmp/jaccld-test.sock")
+	cfg := integrationConfig(1, 2, "rdma_en1", "127.0.0.1:1", false)
+	if cfg.Backend != BackendDaemon || cfg.DaemonSocket != "/tmp/jaccld-test.sock" {
+		t.Fatalf("backend/socket = %q/%q", cfg.Backend, cfg.DaemonSocket)
+	}
+}
+
 func requireRDMAReadyToRun(t *testing.T) {
 	t.Helper()
 	requireRTRAllowed(t)
@@ -258,10 +269,12 @@ func integrationConfig(rank, size int, device, coordinator string, preferRing bo
 		}
 	}
 	return Config{
-		Rank:        rank,
-		Coordinator: coordinator,
-		Devices:     devices,
-		PreferRing:  preferRing,
+		Rank:         rank,
+		Coordinator:  coordinator,
+		Devices:      devices,
+		PreferRing:   preferRing,
+		Backend:      os.Getenv("JACCL_BACKEND"),
+		DaemonSocket: os.Getenv("JACCL_DAEMON_SOCKET"),
 	}
 }
 

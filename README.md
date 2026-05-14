@@ -60,6 +60,10 @@ A daemon rank is started with explicit rank metadata:
 jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000 -heartbeat 1m
 ```
 
+Daemon-backed integration tests use the same `TestIntegrationChild` helper as
+the direct backend, with `JACCL_BACKEND=daemon` and `JACCL_DAEMON_SOCKET` set to
+the local daemon socket for each rank.
+
 `-no-rdma` starts only the IPC server and slab allocator for hardware-free
 smoke tests.
 
