@@ -253,28 +253,28 @@ $ go test -v ./gojaccl/...
     --- PASS: TestErrorContext/IncludesOperation (0.00s)
     --- PASS: TestErrorContext/WrapsContextError (0.00s)
 === RUN   TestIntegrationTwoRankBarrierAndAllSum
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationTwoRankBarrierAndAllSum (0.00s)
 === RUN   TestIntegrationTwoRankAllMax
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationTwoRankAllMax (0.00s)
 === RUN   TestIntegrationTwoRankAllMin
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationTwoRankAllMin (0.00s)
 === RUN   TestIntegrationTwoRankAllGather
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationTwoRankAllGather (0.00s)
 === RUN   TestIntegrationTwoRankSendRecv
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationTwoRankSendRecv (0.00s)
 === RUN   TestIntegrationPeerFailure
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationPeerFailure (0.00s)
 === RUN   TestIntegrationRingPreferredWhenValid
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationRingPreferredWhenValid (0.00s)
 === RUN   TestIntegrationMeshFallbackWhenRingInvalid
-    integration_test.go:24: set JACCL_TEST_RDMA=1 to run RDMA integration tests
+    integration_test.go:21: set JACCL_TEST_RDMA=1 to run RDMA integration tests
 --- SKIP: TestIntegrationMeshFallbackWhenRingInvalid (0.00s)
 === RUN   Example
 --- PASS: Example (0.00s)
