@@ -6,11 +6,10 @@ general topology claim.
 
 ## Accepted Claim
 
-At commit `7a06b692cf2241c1c03702c3bab5ec252d4c308e`, explicit
-same-data-QP maintenance passed a two-host Apple Thunderbolt RDMA proof with:
+Explicit same-data-QP maintenance has passed two-host Apple Thunderbolt RDMA
+proofs with:
 
 - RDMA pinned to `rdma_en1` on both hosts;
-- `tcpchan` carried only over SSH loopback forwards;
 - matching binaries on both hosts;
 - fresh preflight and postflight provider state;
 - pre-idle daemon-backed barrier-sum passing;
@@ -21,7 +20,7 @@ same-data-QP maintenance passed a two-host Apple Thunderbolt RDMA proof with:
   postflight failure;
 - clean daemon and tunnel cleanup.
 
-The preserved artifact is:
+The SSH-forwarded loopback `tcpchan` artifact is:
 
 ```text
 /Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z
@@ -29,12 +28,22 @@ The preserved artifact is:
 sha256 fd36e9726440a1224fafc9890184bbbc5321c114c3390baca25c2c7d2c054c67
 ```
 
+The direct non-loopback `tcpchan` artifact for the same two-host `rdma_en1`
+setup is:
+
+```text
+/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z
+/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z.tar.gz
+sha256 3b52dd281e4b3493e0b90d5018e21a11c4c74ec3e7894f13f1ff88754caaf9bb
+```
+
 The accepted production statement is:
 
 `jaccld` provides daemon-owned RDMA resources, provider-free control-plane
 lease health, fail-closed datapath health, and explicit same-data-QP
-maintenance for the documented two-host `rdma_en1` plus SSH-forwarded
-`tcpchan` deployment.
+maintenance for the documented two-host `rdma_en1` deployment, using either
+SSH-forwarded loopback `tcpchan` or the proved direct `rdma_en1` IP-pair
+`tcpchan` with explicit `-allow-remote-tcpchan`.
 
 ## Maintenance Operation
 
@@ -89,11 +98,10 @@ application data QP that is known to go idle.
 The proof does not establish:
 
 - direct Go TCP control-plane production readiness over non-loopback
-  interfaces;
+  interfaces outside the proved two-host `rdma_en1` IP pair;
 - RDMA_WRITE heartbeat production readiness;
 - arbitrary `size > 2` topologies;
 - non-`rdma_en1` Thunderbolt RDMA layouts;
-- non-SSH-forwarded `tcpchan` deployments;
 - automated cluster deployment readiness.
 
 Direct non-loopback `tcpchan` use is intentionally fail-closed by default and

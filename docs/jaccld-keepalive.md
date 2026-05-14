@@ -86,12 +86,17 @@ liveness, but it does not prove the user data QP stayed warm.
 ## Production Envelope
 
 The proven Apple Thunderbolt RDMA envelope is two physical hosts, RDMA pinned
-to `rdma_en1`, SSH-forwarded loopback `tcpchan`, daemon-owned slabs and queue
-pairs, explicit same-data-QP maintenance during idle, and fail-closed route
-health. The preserved proof artifact is
-`/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`.
+to `rdma_en1`, daemon-owned slabs and queue pairs, explicit same-data-QP
+maintenance during idle, and fail-closed route health. The control plane is
+proved with SSH-forwarded loopback `tcpchan` and, for the documented `rdma_en1`
+IP pair only, direct non-loopback `tcpchan` with explicit
+`-allow-remote-tcpchan`.
 
-Direct Go TCP control-plane production readiness, RDMA_WRITE heartbeat
-production readiness, arbitrary rank counts, non-`rdma_en1` devices, and
-non-SSH-forwarded deployments remain excluded until separate artifacts prove
-them.
+The preserved proof artifacts are:
+
+- `/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`
+- `/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z`
+
+RDMA_WRITE heartbeat production readiness, arbitrary rank counts,
+non-`rdma_en1` devices, and arbitrary non-loopback deployments remain excluded
+until separate artifacts prove them.

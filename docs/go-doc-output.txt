@@ -113,9 +113,10 @@ liveness pulses, and serves local clients through a Unix-domain socket. The
 daemon transport supports barrier, send, recv, and daemon-supported collectives
 over leased slab offsets.
 
-The supported production coordinator is loopback, usually over SSH local
+The default production coordinator is loopback, usually over SSH local
 forwards. Non-loopback coordinators require -allow-remote-tcpchan after a
-separate jacclctl tcp-diagnostic proof.
+separate jacclctl tcp-diagnostic proof. Direct non-loopback tcpchan is proved
+only for the documented two-host rdma_en1 IP pair.
 
 Daemon-backed RDMA_WRITE heartbeats are disabled by default and are not the
 Apple Thunderbolt RDMA production path. The accepted data-QP path is explicit
@@ -123,8 +124,9 @@ same-QP maintenance: admission is stopped, daemon operations are drained,
 connection locks are held, TCP side-channel barriers bracket reserved same-QP
 maintenance traffic, and any provider, CQ, barrier, timeout, poison, or
 maintenance failure stops the route without retry. The proved envelope is two
-hosts, rdma_en1, SSH-forwarded loopback tcpchan, and passing pre/post
-daemon-backed smoke around a 47-minute idle window.
+hosts and rdma_en1, with SSH-forwarded loopback tcpchan or the documented
+direct rdma_en1 IP-pair tcpchan, and passing pre/post daemon-backed smoke
+around a long idle window.
 
 == gojaccl/cmd/jacclctl ==
 

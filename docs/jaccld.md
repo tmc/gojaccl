@@ -83,12 +83,13 @@ SEND/RECV maintenance traffic, polls with expected-completion matching, runs a
 TCP side-channel post-barrier, and only then reopens admission.
 
 The accepted proof envelope is narrow: two physical Apple Thunderbolt RDMA
-hosts, RDMA explicitly pinned to `rdma_en1`, `tcpchan` carried over SSH
-loopback forwards, matching binaries, fresh pre/postflight provider state, no
-automated retry, and preserved artifacts under
-`/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`.
-That proof ran 45 successful maintenance rounds across a 47-minute idle window,
-then passed daemon-backed barrier-sum again with `rdma_en1` still active.
+hosts, RDMA explicitly pinned to `rdma_en1`, matching binaries, fresh
+pre/postflight provider state, no automated retry, and preserved artifacts. It
+has passed with SSH-forwarded loopback `tcpchan` and with direct non-loopback
+`tcpchan` over the documented `rdma_en1` IP pair using explicit
+`-allow-remote-tcpchan`. Both proofs ran 45 successful maintenance rounds
+across a long idle window, then passed daemon-backed barrier-sum again with
+`rdma_en1` still active.
 
 Control-plane liveness remains a separate health signal. It proves daemon and
 lease reachability, not that a data QP stayed warm. Dedicated heartbeat QPs are
@@ -179,8 +180,8 @@ lease expiry. It does not decide tensor parallelism policy.
   MR lease rules.
 - `docs/jaccld-data-qp-keepalive.md`: proven data-QP maintenance envelope,
   rejected paths, and remaining exclusions.
-- `docs/operator-runbook.md`: operator checklist for the supported
-  SSH-forwarded two-host deployment.
+- `docs/operator-runbook.md`: operator checklist for the supported two-host
+  `rdma_en1` deployment.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions

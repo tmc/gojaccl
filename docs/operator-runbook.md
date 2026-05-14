@@ -1,9 +1,10 @@
 # jaccld operator runbook
 
 This runbook describes the supported Apple Thunderbolt RDMA production envelope
-proved for `jaccld`: two physical hosts, RDMA pinned to `rdma_en1`, `tcpchan`
-carried over SSH loopback forwards, daemon-owned resources, and explicit
-same-data-QP maintenance during idle.
+proved for `jaccld`: two physical hosts, RDMA pinned to `rdma_en1`, daemon-owned
+resources, and explicit same-data-QP maintenance during idle. The control plane
+is proven both with SSH-forwarded loopback `tcpchan` and, for the documented
+`rdma_en1` IP pair only, direct non-loopback `tcpchan`.
 
 ## Preconditions
 
@@ -35,8 +36,8 @@ shasum -a 256 ./jaccld ./jacclctl ./gojaccl.test
 
 ## TCP Side Channel
 
-The supported control-plane shape is loopback `tcpchan` over SSH local
-forwards. Direct non-loopback Go TCP is not a production claim.
+The default supported control-plane shape is loopback `tcpchan` over SSH local
+forwards.
 
 One host should forward a local coordinator port to the other host. Use
 explicit loopback endpoints; do not tunnel RDMA payloads, daemon UDS traffic,
@@ -51,9 +52,11 @@ ssh -N -L 127.0.0.1:38411:127.0.0.1:38412 tmc2@10.0.18.249
 Use matching `-coordinator 127.0.0.1:PORT` values when starting the two daemon
 ranks. The daemon rejects non-loopback coordinators by default.
 
-Before choosing a future direct non-loopback `tcpchan`, prove payload delivery
-with `jacclctl tcp-diagnostic` and preserve the output. Start the listener on
-one host:
+Direct non-loopback `tcpchan` has also been proved for the two-host `rdma_en1`
+IP pair, using `172.31.253.2` as the rank-zero coordinator and explicit
+`-allow-remote-tcpchan` on both daemon ranks. Before using any other
+non-loopback path, prove payload delivery with `jacclctl tcp-diagnostic` and
+preserve the output. Start the listener on one host:
 
 ```sh
 jacclctl tcp-diagnostic -listen 10.0.18.249:39000
@@ -66,13 +69,15 @@ jacclctl tcp-diagnostic -dial 10.0.18.249:39000
 ```
 
 Only after that direct TCP diagnostic passes should an operator consider
-`jaccld -allow-remote-tcpchan`. This still does not upgrade the documented
-production claim without a full RDMA proof using that control plane.
+`jaccld -allow-remote-tcpchan`. Outside the documented `rdma_en1` IP pair, this
+still does not upgrade the production claim without a full RDMA proof using that
+control plane.
 
 ## Daemon Startup
 
-Start one daemon rank per host. Bind RDMA to `rdma_en1` and use loopback
-coordinator addresses from the SSH-forwarded side channel.
+Start one daemon rank per host. Bind RDMA to `rdma_en1` and use either loopback
+coordinator addresses from the SSH-forwarded side channel or the documented
+direct `rdma_en1` coordinator address with `-allow-remote-tcpchan`.
 
 Rank 0 example:
 
@@ -94,6 +99,18 @@ jaccld \
   -rank 1 \
   -size 2 \
   -coordinator 127.0.0.1:38411
+```
+
+Direct `rdma_en1` coordinator example:
+
+```sh
+jaccld \
+  -socket /tmp/jaccld-rank0.sock \
+  -device rdma_en1 \
+  -rank 0 \
+  -size 2 \
+  -coordinator 172.31.253.2:39311 \
+  -allow-remote-tcpchan
 ```
 
 Expected logs include side-channel startup, slab creation, hardware open,

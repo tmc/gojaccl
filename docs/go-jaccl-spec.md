@@ -272,8 +272,10 @@ The accepted data-QP path is explicit same-QP maintenance. It runs only after
 all ranks stop admitting user operations, drain active daemon operations, hold
 the relevant endpoint locks, and synchronize over TCP side-channel barriers
 before and after reserved same-QP maintenance traffic. The physically proved
-production envelope is two hosts, `rdma_en1`, SSH-forwarded loopback `tcpchan`,
-45 successful maintenance rounds over a 47-minute idle window, and passing
-pre/post daemon-backed barrier-sum. A dedicated heartbeat QP may prove
+production envelope is two hosts and `rdma_en1`, with 45 successful maintenance
+rounds over a long idle window and passing pre/post daemon-backed barrier-sum.
+The control plane is proved with SSH-forwarded loopback `tcpchan` and, for the
+documented `rdma_en1` IP pair only, direct non-loopback `tcpchan` with explicit
+`-allow-remote-tcpchan`. A dedicated heartbeat QP may prove
 daemon/provider/control-plane liveness, but it does not prove the user data QP
 stayed warm.

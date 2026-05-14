@@ -62,10 +62,11 @@ A daemon rank is started with explicit rank metadata:
 jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
 ```
 
-The production control plane uses loopback `tcpchan` addresses, normally
-through SSH local forwards between hosts. Non-loopback coordinators are rejected
-unless `-allow-remote-tcpchan` is set after an explicit `jacclctl
-tcp-diagnostic` proof.
+The default production control plane uses loopback `tcpchan` addresses,
+normally through SSH local forwards between hosts. Non-loopback coordinators are
+rejected unless `-allow-remote-tcpchan` is set after an explicit `jacclctl
+tcp-diagnostic` proof. Direct non-loopback `tcpchan` is currently proven only
+for the documented two-host `rdma_en1` IP pair.
 
 An operator can trigger the explicit maintenance operation through the daemon
 socket:
@@ -89,13 +90,13 @@ completion metadata, not wire tags.
 
 The accepted production envelope is explicit same-data-QP maintenance, not a
 background heartbeat: two Apple Thunderbolt RDMA hosts, RDMA pinned to
-`rdma_en1`, `tcpchan` carried over SSH loopback forwards, admission stopped on
-all ranks, peer locks held, side-channel pre/post barriers, and fail-closed
-route poisoning on any provider, CQ, barrier, or maintenance error. This path
-has a preserved two-host 47-minute idle proof with 45/45 maintenance rounds and
-passing pre/post daemon-backed barrier-sum. Direct Go TCP control-plane
-production readiness, RDMA_WRITE heartbeat production readiness, arbitrary
-rank counts, non-`rdma_en1` layouts, and non-SSH-forwarded deployments remain
+`rdma_en1`, admission stopped on all ranks, peer locks held, side-channel
+pre/post barriers, and fail-closed route poisoning on any provider, CQ, barrier,
+or maintenance error. This path has preserved long-idle proofs with 45/45
+maintenance rounds and passing pre/post daemon-backed barrier-sum using both
+SSH-forwarded loopback `tcpchan` and direct non-loopback `tcpchan` over the
+`rdma_en1` IP pair. RDMA_WRITE heartbeat production readiness, arbitrary rank
+counts, non-`rdma_en1` layouts, and arbitrary non-loopback deployments remain
 excluded until separately proven.
 
 ## Dependency
