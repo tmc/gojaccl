@@ -210,7 +210,7 @@ Files:
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives,
   heartbeat MR lease exchange, gated experimental RDMA-write heartbeat setup,
-  barrier, and transport close behavior.
+  heartbeat poison-on-error behavior, barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 - `transport_test.go`: hardware-free daemon collective offset and reduction
@@ -226,7 +226,9 @@ peer receives and is not safe on the raw data queue pair. Do not enable
 RDMA-write heartbeats without a real nonzero remote heartbeat address, rkey,
 length, epoch, and live lease TTL.
 Keep heartbeat CQ polling serialized with the connection lock until a WR-ID
-demux exists.
+demux exists. If a posted heartbeat cannot be polled to completion, poison the
+connection and fail later user traffic closed rather than risking late-CQE
+misattribution.
 
 ## Design Notes
 

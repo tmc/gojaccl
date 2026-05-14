@@ -124,6 +124,9 @@ func (t *Tracker) BeatIdle(ctx context.Context) error {
 	var work []due
 	t.mu.Lock()
 	for id, r := range t.routes {
+		if !r.status.Healthy {
+			continue
+		}
 		if now.Sub(r.status.LastActivity) >= t.interval {
 			work = append(work, due{id: id, sender: r.sender})
 		}

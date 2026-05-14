@@ -82,8 +82,9 @@ rkey metadata, a positive `-heartbeat-timeout`, and a positive
 `-heartbeat-lease-ttl`; otherwise startup fails closed. Daemon peers exchange
 the real `HeartbeatMR{Addr,RKey,Length,Epoch}` for a byte reserved from the
 already-registered slab. This is the lease contract for RDMA-write heartbeat
-arming. It is not, by itself, evidence that long-lived idle QP keepalive safety
-is solved.
+arming. The default daemon path does not require a nonzero rkey when the
+experimental heartbeat flag is disabled. The lease contract is not, by itself,
+evidence that long-lived idle QP keepalive safety is solved.
 
 A production keepalive uses control-plane liveness as the default safety
 signal. The resource store records live-session activity and health without
@@ -96,8 +97,11 @@ Apple-provider zero rkeys.
 When the experimental RDMA-write path is enabled, heartbeats post a bounded
 one-byte RDMA write to the remote heartbeat MR lease. The daemon keeps heartbeat
 completion polling serialized with the connection lock until a WR-ID demux
-exists, and heartbeat failures mark the route unhealthy without tearing down the
-daemon-owned device, protection domain, or registered memory region.
+exists. A heartbeat post followed by a poll error poisons the connection so
+later user traffic cannot consume a late heartbeat completion as user work.
+Heartbeat failures mark the route unhealthy without tearing down the
+daemon-owned device, protection domain, or registered memory region, and the
+tracker does not retry unhealthy routes.
 
 ## IPC Model
 

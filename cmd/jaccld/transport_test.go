@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 	"unsafe"
@@ -124,6 +125,25 @@ func TestHeartbeatMRFromLease(t *testing.T) {
 	}
 }
 
+func TestLocalHeartbeatLeaseDisabledAllowsZeroRKey(t *testing.T) {
+	now := time.Unix(100, 0)
+	lease, ttl, err := localHeartbeatLease(false, 100, 0, allocator.Lease{ID: 7, Offset: 5, Length: 1}, 0, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease != (daemonHeartbeatLease{}) || ttl != 0 {
+		t.Fatalf("disabled heartbeat lease = %+v ttl %s, want zero", lease, ttl)
+	}
+}
+
+func TestLocalHeartbeatLeaseEnabledRequiresRKey(t *testing.T) {
+	now := time.Unix(100, 0)
+	_, _, err := localHeartbeatLease(true, 100, 0, allocator.Lease{ID: 7, Offset: 5, Length: 1}, time.Minute, now)
+	if !errors.Is(err, resource.ErrInvalidRequest) {
+		t.Fatalf("enabled zero rkey = %v, want ErrInvalidRequest", err)
+	}
+}
+
 func TestValidateRemoteHeartbeatDestination(t *testing.T) {
 	now := time.Unix(100, 0)
 	dst := daemonDestination{
@@ -151,6 +171,26 @@ func TestValidateRemoteHeartbeatDestination(t *testing.T) {
 	dst.HeartbeatMR.RKey = 0
 	if _, err := validateRemoteHeartbeatDestination(dst, now, 0); !errors.Is(err, resource.ErrInvalidRequest) {
 		t.Fatalf("zero rkey = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestDaemonTransportUserTrafficFailsAfterHeartbeatPoison(t *testing.T) {
+	slab := newTransportTestSlab(t)
+	lease := allocBytes(t, slab, []byte("x"))
+	conn := &daemonConn{}
+	conn.poisonHeartbeat(errors.New("heartbeat poll timeout"))
+	tp := &daemonTransport{
+		rank:  0,
+		size:  2,
+		slab:  slab,
+		conns: []*daemonConn{nil, conn},
+	}
+	err := tp.Send(context.Background(), 1, lease.Offset, lease.Length)
+	if err == nil || !strings.Contains(err.Error(), "heartbeat poll timeout") {
+		t.Fatalf("Send after heartbeat poison = %v, want heartbeat error", err)
+	}
+	if conn.heartbeatErrors.Load() != 0 || conn.heartbeatWrites.Load() != 0 {
+		t.Fatalf("heartbeat counters = errors %d writes %d, want zero user-path mutation", conn.heartbeatErrors.Load(), conn.heartbeatWrites.Load())
 	}
 }
 

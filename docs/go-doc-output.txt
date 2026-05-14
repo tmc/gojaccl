@@ -114,7 +114,8 @@ and daemon-supported collectives over leased slab offsets.
 
 Daemon-backed RDMA heartbeats are disabled by default. The experimental
 RDMA-write heartbeat hook requires explicit opt-in and nonzero remote heartbeat
-address, rkey, length, epoch, and live lease metadata.
+address, rkey, length, epoch, and live lease metadata. The default daemon path
+does not require a nonzero rkey.
 
 == gojaccl/internal/allocator ==
 
@@ -209,7 +210,8 @@ type Status struct{ ... }
 type Tracker struct{ ... }
     func New(interval time.Duration) (*Tracker, error)
 
-Status includes heartbeat attempt and error counters for proof artifacts.
+Status includes heartbeat attempt and error counters for proof artifacts. Routes
+with heartbeat errors are not retried.
 
 == gojaccl/internal/rdma ==
 

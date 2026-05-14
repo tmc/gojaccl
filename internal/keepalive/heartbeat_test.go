@@ -110,6 +110,34 @@ func TestTrackerRecordsHeartbeatError(t *testing.T) {
 	}
 }
 
+func TestTrackerDoesNotRetryUnhealthyRoute(t *testing.T) {
+	now := time.Unix(100, 0)
+	tr, err := New(time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr.SetNow(func() time.Time { return now })
+	var calls int
+	want := errors.New("post write")
+	if err := tr.Add("qp1", SenderFunc(func(context.Context) error {
+		calls++
+		return want
+	})); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Minute)
+	if err := tr.BeatIdle(context.Background()); !errors.Is(err, want) {
+		t.Fatalf("BeatIdle = %v, want %v", err, want)
+	}
+	now = now.Add(time.Minute)
+	if err := tr.BeatIdle(context.Background()); err != nil {
+		t.Fatalf("BeatIdle unhealthy = %v, want nil", err)
+	}
+	if calls != 1 {
+		t.Fatalf("heartbeat calls = %d, want 1", calls)
+	}
+}
+
 func TestTrackerRejectsBadInput(t *testing.T) {
 	if _, err := New(0); err == nil {
 		t.Fatal("New(0) = nil")

@@ -47,6 +47,7 @@ type daemonConn struct {
 	remoteHeartbeat daemonHeartbeatLease
 	heartbeatWrites atomic.Uint64
 	heartbeatErrors atomic.Uint64
+	poison          atomic.Value
 	mu              sync.Mutex
 }
 
@@ -73,18 +74,7 @@ func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel,
 	if side == nil {
 		return nil, fmt.Errorf("open daemon transport: nil side channel")
 	}
-	ttl := cfg.heartbeatLeaseTTL
-	if ttl == 0 {
-		ttl = defaultHeartbeatLeaseTTL
-	}
-	if ttl <= 0 {
-		return nil, fmt.Errorf("open daemon transport: heartbeat lease ttl %s must be positive", ttl)
-	}
-	epoch := uint64(time.Now().UnixNano())
-	if epoch == 0 {
-		epoch = heartbeat.ID
-	}
-	hb, err := heartbeatMR(hw.mr.Addr(), hw.mr.RKey(), heartbeat, epoch)
+	hb, ttl, err := localHeartbeatLease(tracker != nil, hw.mr.Addr(), hw.mr.RKey(), heartbeat, cfg.heartbeatLeaseTTL, time.Now())
 	if err != nil {
 		return nil, fmt.Errorf("open daemon transport: heartbeat lease: %w", err)
 	}
@@ -94,7 +84,7 @@ func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel,
 		slab:             slab,
 		mr:               hw.mr,
 		tracker:          tracker,
-		heartbeatLease:   daemonHeartbeatLease{MR: hb, ExpiresAt: time.Now().Add(ttl)},
+		heartbeatLease:   hb,
 		heartbeatTimeout: cfg.heartbeatTimeout,
 		heartbeatTTL:     ttl,
 		conns:            make([]*daemonConn, cfg.size),
@@ -119,10 +109,13 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		t.conns[peer] = conn
-		local[peer] = daemonDestination{
-			QP:           dst,
-			HeartbeatMR:  t.heartbeatLease.MR,
-			HeartbeatTTL: t.heartbeatTTL,
+		local[peer] = daemonDestination{QP: dst}
+		if t.tracker != nil {
+			local[peer] = daemonDestination{
+				QP:           dst,
+				HeartbeatMR:  t.heartbeatLease.MR,
+				HeartbeatTTL: t.heartbeatTTL,
+			}
 		}
 	}
 
@@ -173,6 +166,27 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 		return fmt.Errorf("ready barrier: %w", err)
 	}
 	return nil
+}
+
+func localHeartbeatLease(enabled bool, base uint64, rkey uint32, lease allocator.Lease, ttl time.Duration, now time.Time) (daemonHeartbeatLease, time.Duration, error) {
+	if !enabled {
+		return daemonHeartbeatLease{}, 0, nil
+	}
+	if ttl == 0 {
+		ttl = defaultHeartbeatLeaseTTL
+	}
+	if ttl <= 0 {
+		return daemonHeartbeatLease{}, 0, fmt.Errorf("heartbeat lease ttl %s must be positive", ttl)
+	}
+	epoch := uint64(now.UnixNano())
+	if epoch == 0 {
+		epoch = lease.ID
+	}
+	hb, err := heartbeatMR(base, rkey, lease, epoch)
+	if err != nil {
+		return daemonHeartbeatLease{}, 0, err
+	}
+	return daemonHeartbeatLease{MR: hb, ExpiresAt: now.Add(ttl)}, ttl, nil
 }
 
 func heartbeatMR(base uint64, rkey uint32, lease allocator.Lease, epoch uint64) (resource.HeartbeatMR, error) {
@@ -270,8 +284,14 @@ func (t *daemonTransport) Send(ctx context.Context, peer int, offset, length int
 	if err != nil {
 		return err
 	}
+	if err := conn.checkReady(peer); err != nil {
+		return err
+	}
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
+	if err := conn.checkReady(peer); err != nil {
+		return err
+	}
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
 		if err := rdma.PostSend(conn.qp, t.mr, start+off, chunk, transportWorkID(1, peer)); err != nil {
@@ -297,8 +317,14 @@ func (t *daemonTransport) Recv(ctx context.Context, peer int, offset, length int
 	if err != nil {
 		return err
 	}
+	if err := conn.checkReady(peer); err != nil {
+		return err
+	}
 	conn.mu.Lock()
 	defer conn.mu.Unlock()
+	if err := conn.checkReady(peer); err != nil {
+		return err
+	}
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
 		if err := rdma.PostRecv(conn.qp, t.mr, start+off, chunk, transportWorkID(2, peer)); err != nil {
@@ -434,6 +460,14 @@ func (t *daemonTransport) exchange(ctx context.Context, dstBase, srcOffset, leng
 		return err
 	}
 	defer unlockDaemonConns(locked)
+	for peer, conn := range t.conns {
+		if peer == t.rank || conn == nil {
+			continue
+		}
+		if err := conn.checkReady(peer); err != nil {
+			return err
+		}
+	}
 
 	for off := 0; off < n; off += daemonTransferBytes {
 		chunk := min(daemonTransferBytes, n-off)
@@ -524,6 +558,9 @@ func (t *daemonTransport) bytes() []byte {
 func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 	conn, err := t.conn(peer)
 	if err != nil {
+		return err
+	}
+	if err := conn.checkReady(peer); err != nil {
 		return err
 	}
 	offset, err := t.localHeartbeatOffset()
@@ -665,12 +702,32 @@ func (c *daemonConn) recordHeartbeat(peer int, err error) {
 		return
 	}
 	if err != nil {
+		c.poisonHeartbeat(err)
 		n := c.heartbeatErrors.Add(1)
 		log.Printf("jaccld heartbeat peer=%d ok=false errors=%d err=%v", peer, n, err)
 		return
 	}
 	n := c.heartbeatWrites.Add(1)
 	log.Printf("jaccld heartbeat peer=%d ok=true writes=%d", peer, n)
+}
+
+func (c *daemonConn) checkReady(peer int) error {
+	if c == nil {
+		return fmt.Errorf("rank %d has no RDMA connection", peer)
+	}
+	if v := c.poison.Load(); v != nil {
+		return fmt.Errorf("rank %d RDMA connection poisoned after heartbeat failure: %s", peer, v.(string))
+	}
+	return nil
+}
+
+func (c *daemonConn) poisonHeartbeat(err error) {
+	if c == nil || err == nil {
+		return
+	}
+	if c.poison.Load() == nil {
+		c.poison.Store(err.Error())
+	}
 }
 
 func transportWorkID(kind, peer int) uint64 {

@@ -43,7 +43,9 @@ Daemon peers also exchange heartbeat leases during startup. Each daemon
 reserves a byte from the already-registered slab, publishes the real remote
 address and rkey for that byte, and attaches a lease epoch and TTL. The
 receiver rejects missing metadata, stale epochs, and expired leases before
-arming an RDMA heartbeat.
+arming an RDMA heartbeat. This exchange only happens when
+`-experimental-rdma-heartbeat` is enabled; the default daemon data path does
+not require a nonzero remote memory key.
 
 ## Deferred Work
 
@@ -51,7 +53,9 @@ The RDMA-write keepalive execution path remains gated behind
 `-experimental-rdma-heartbeat` until the physical proof passes. When enabled it
 posts a bounded one-byte RDMA write to the remote heartbeat MR lease, serializes
 CQ polling with the connection lock, and records success/error counters in the
-heartbeat tracker and daemon logs.
+heartbeat tracker and daemon logs. If a heartbeat post is followed by a poll
+error or timeout, the connection is poisoned and later user traffic fails closed
+until daemon restart. The tracker does not retry an unhealthy route.
 
 The remaining proof work is a two-host long-idle run that demonstrates those
 heartbeats keep Apple Thunderbolt RDMA queue pairs usable beyond the known idle
