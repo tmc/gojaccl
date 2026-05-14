@@ -94,3 +94,4 @@ Design and validation artifacts live under `docs/`:
 - `docs/go-test-output.txt`
 - `docs/jaccld.md`
 - `docs/jaccld-keepalive.md`
+- `docs/jaccld-data-qp-keepalive.md`

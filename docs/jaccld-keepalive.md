@@ -82,3 +82,5 @@ liveness, but it does not prove the user data QP stayed warm.
 The production behavior remains TCP/control-plane liveness plus fail-closed
 datapath health. The remaining open problem is a provider-safe way to keep the
 actual data QP warm without consuming application receive FIFO entries.
+`docs/jaccld-data-qp-keepalive.md` records the stop condition, rejected
+background paths, and proof gates for any future implementation.

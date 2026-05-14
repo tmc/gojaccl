@@ -163,6 +163,8 @@ lease expiry. It does not decide tensor parallelism policy.
   pool interfaces.
 - `docs/jaccld-keepalive.md`: provider-free keepalive contract and heartbeat
   MR lease rules.
+- `docs/jaccld-data-qp-keepalive.md`: remaining data-QP keepalive stop
+  condition, rejected paths, and proof gates.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
 
 ## Stop Conditions
