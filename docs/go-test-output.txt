@@ -590,30 +590,88 @@ ok  	<module>/gojaccl/internal/tcpchan	0.074s
 
 == gojaccl/cmd/jaccld ==
 
+=== RUN   TestAdmissionGateMaintenanceWaitsForInFlight
+--- PASS: TestAdmissionGateMaintenanceWaitsForInFlight (0.02s)
+=== RUN   TestAdmissionGateBlocksNewDataOpsDuringMaintenance
+--- PASS: TestAdmissionGateBlocksNewDataOpsDuringMaintenance (0.02s)
+=== RUN   TestAdmissionGateEnterHonorsContext
+--- PASS: TestAdmissionGateEnterHonorsContext (0.00s)
+=== RUN   TestAdmissionGateMaintenanceCancelReopensAdmission
+--- PASS: TestAdmissionGateMaintenanceCancelReopensAdmission (0.00s)
+=== RUN   TestDaemonTransportMaintenanceBlocksCollectives
+--- PASS: TestDaemonTransportMaintenanceBlocksCollectives (0.00s)
+=== RUN   TestDaemonTransportMaintenanceBlocksBarrier
+--- PASS: TestDaemonTransportMaintenanceBlocksBarrier (0.03s)
+=== RUN   TestDaemonTransportMaintenanceWindowUsesSideBarriers
+--- PASS: TestDaemonTransportMaintenanceWindowUsesSideBarriers (0.05s)
 === RUN   TestConfigValidateRDMA
 === RUN   TestConfigValidateRDMA/valid
+=== RUN   TestConfigValidateRDMA/valid_experimental_heartbeat
 === RUN   TestConfigValidateRDMA/negative_rank
 === RUN   TestConfigValidateRDMA/zero_size
 === RUN   TestConfigValidateRDMA/rank_out_of_range
 === RUN   TestConfigValidateRDMA/empty_coordinator
-=== RUN   TestConfigValidateRDMA/zero_heartbeat
+=== RUN   TestConfigValidateRDMA/zero_heartbeat_without_experimental_RDMA_heartbeat
+=== RUN   TestConfigValidateRDMA/experimental_zero_heartbeat
+=== RUN   TestConfigValidateRDMA/experimental_zero_heartbeat_timeout
+=== RUN   TestConfigValidateRDMA/experimental_zero_heartbeat_lease_ttl
 --- PASS: TestConfigValidateRDMA (0.00s)
     --- PASS: TestConfigValidateRDMA/valid (0.00s)
+    --- PASS: TestConfigValidateRDMA/valid_experimental_heartbeat (0.00s)
     --- PASS: TestConfigValidateRDMA/negative_rank (0.00s)
     --- PASS: TestConfigValidateRDMA/zero_size (0.00s)
     --- PASS: TestConfigValidateRDMA/rank_out_of_range (0.00s)
     --- PASS: TestConfigValidateRDMA/empty_coordinator (0.00s)
-    --- PASS: TestConfigValidateRDMA/zero_heartbeat (0.00s)
+    --- PASS: TestConfigValidateRDMA/zero_heartbeat_without_experimental_RDMA_heartbeat (0.00s)
+    --- PASS: TestConfigValidateRDMA/experimental_zero_heartbeat (0.00s)
+    --- PASS: TestConfigValidateRDMA/experimental_zero_heartbeat_timeout (0.00s)
+    --- PASS: TestConfigValidateRDMA/experimental_zero_heartbeat_lease_ttl (0.00s)
+=== RUN   TestRunRejectsNegativeControlPlaneLiveness
+--- PASS: TestRunRejectsNegativeControlPlaneLiveness (0.00s)
 === RUN   TestRunNoRDMAStartsIPC
 --- PASS: TestRunNoRDMAStartsIPC (0.01s)
+=== RUN   TestRunControlPlaneLivenessUpdatesSession
+--- PASS: TestRunControlPlaneLivenessUpdatesSession (0.02s)
 === RUN   TestDaemonTransportMeshReduceOffline
 --- PASS: TestDaemonTransportMeshReduceOffline (0.00s)
 === RUN   TestDaemonTransportMeshGatherOffline
 --- PASS: TestDaemonTransportMeshGatherOffline (0.00s)
 === RUN   TestDaemonTransportCollectiveValidation
 --- PASS: TestDaemonTransportCollectiveValidation (0.00s)
+=== RUN   TestHeartbeatMRFromLease
+=== RUN   TestHeartbeatMRFromLease/ZeroBase
+=== RUN   TestHeartbeatMRFromLease/ZeroRKey
+=== RUN   TestHeartbeatMRFromLease/ZeroLength
+=== RUN   TestHeartbeatMRFromLease/ZeroEpoch
+=== RUN   TestHeartbeatMRFromLease/NegativeOffset
+=== RUN   TestHeartbeatMRFromLease/Overflow
+--- PASS: TestHeartbeatMRFromLease (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/ZeroBase (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/ZeroRKey (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/ZeroLength (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/ZeroEpoch (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/NegativeOffset (0.00s)
+    --- PASS: TestHeartbeatMRFromLease/Overflow (0.00s)
+=== RUN   TestLocalHeartbeatLeaseDisabledAllowsZeroRKey
+--- PASS: TestLocalHeartbeatLeaseDisabledAllowsZeroRKey (0.00s)
+=== RUN   TestLocalHeartbeatLeaseEnabledRequiresRKey
+--- PASS: TestLocalHeartbeatLeaseEnabledRequiresRKey (0.00s)
+=== RUN   TestValidateRemoteHeartbeatDestination
+--- PASS: TestValidateRemoteHeartbeatDestination (0.00s)
+=== RUN   TestDaemonTransportUserTrafficFailsAfterHeartbeatPoison
+--- PASS: TestDaemonTransportUserTrafficFailsAfterHeartbeatPoison (0.00s)
+=== RUN   TestDaemonHeartbeatLeaseRDMAExpires
+--- PASS: TestDaemonHeartbeatLeaseRDMAExpires (0.00s)
+=== RUN   TestDaemonTransportPollExpectedDemuxesPending
+--- PASS: TestDaemonTransportPollExpectedDemuxesPending (0.00s)
+=== RUN   TestDaemonTransportPollExpectedDuplicateIDs
+--- PASS: TestDaemonTransportPollExpectedDuplicateIDs (0.00s)
+=== RUN   TestDaemonTransportPollExpectedPropagatesError
+--- PASS: TestDaemonTransportPollExpectedPropagatesError (0.00s)
+=== RUN   TestTransportWorkIDRoundTrip
+--- PASS: TestTransportWorkIDRoundTrip (0.00s)
 PASS
-ok  	<module>/gojaccl/cmd/jaccld	0.834s
+ok  	<module>/gojaccl/cmd/jaccld	0.744s
 
 == gojaccl/internal/rdma ==
 
