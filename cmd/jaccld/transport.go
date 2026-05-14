@@ -289,6 +289,11 @@ func (t *daemonTransport) Barrier(ctx context.Context) error {
 	if t == nil || t.side == nil {
 		return fmt.Errorf("daemon transport closed")
 	}
+	done, err := t.enterDataOp(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	return t.side.Barrier(ctx)
 }
 

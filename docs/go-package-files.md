@@ -207,8 +207,8 @@ Files:
   operations and waits for in-flight operations to drain before a future
   maintenance window.
 - `admission_test.go`: hardware-free tests for maintenance admission blocking,
-  context cancellation, reopening after cancellation, collective gating, and
-  side-channel maintenance barrier ordering.
+  context cancellation, reopening after cancellation, barrier and collective
+  gating, and side-channel maintenance barrier ordering.
 - `main.go`: command flags, signal handling, shared slab creation, bounded
   resource session store creation, provider-free control-plane liveness loop,
   singleton RDMA device/protection-domain/MR startup, daemon rank validation,

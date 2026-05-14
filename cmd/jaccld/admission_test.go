@@ -129,6 +129,33 @@ func TestDaemonTransportMaintenanceBlocksCollectives(t *testing.T) {
 	}
 }
 
+func TestDaemonTransportMaintenanceBlocksBarrier(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	t0, t1 := newMaintenanceTransportPair(t, ctx)
+
+	end, err := t0.beginMaintenance(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	barrierCtx, cancelBarrier := context.WithCancel(context.Background())
+	errc := make(chan error, 1)
+	go func() {
+		errc <- t0.Barrier(barrierCtx)
+	}()
+
+	peerCtx, cancelPeer := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancelPeer()
+	if err := t1.Barrier(peerCtx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("peer barrier while rank 0 is in maintenance = %v, want context deadline", err)
+	}
+	cancelBarrier()
+	if err := <-errc; !errors.Is(err, context.Canceled) {
+		t.Fatalf("rank 0 barrier during maintenance = %v, want context canceled", err)
+	}
+	end()
+}
+
 func TestDaemonTransportMaintenanceWindowUsesSideBarriers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

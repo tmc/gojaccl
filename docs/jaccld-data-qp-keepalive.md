@@ -84,8 +84,8 @@ for:
 - expected-completion matching handles unrelated completions without losing
   them;
 - unexpected completion, timeout, and provider error poison the route;
-- maintenance cannot run concurrently with send, receive, all-reduce, or
-  all-gather paths;
+- maintenance cannot run concurrently with send, receive, barrier, all-reduce,
+  or all-gather paths;
 - no request handler allocates PD, MR, QP, or CQ resources;
 - `ALLOW_RTR` and integration gates do not drift.
 
