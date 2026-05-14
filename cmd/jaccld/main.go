@@ -85,21 +85,26 @@ func run(ctx context.Context, cfg config) error {
 	var side *tcpchan.Channel
 	if !cfg.noRDMA {
 		var err error
+		log.Printf("jaccld phase=side_channel start rank=%d size=%d coordinator=%s", cfg.rank, cfg.size, cfg.coordinator)
 		side, err = tcpchan.New(ctx, cfg.rank, cfg.size, cfg.coordinator)
 		if err != nil {
 			return fmt.Errorf("side channel: %w", err)
 		}
+		log.Printf("jaccld phase=side_channel done rank=%d size=%d", cfg.rank, cfg.size)
 		defer side.Close()
 	}
+	log.Printf("jaccld phase=slab start bytes=%d", cfg.slabSize)
 	slab, err := allocator.NewSlab("", cfg.slabSize)
 	if err != nil {
 		return err
 	}
+	log.Printf("jaccld phase=slab done bytes=%d", len(slab.Bytes()))
 	defer slab.Close()
 	resources, err := newResourceStore(slab, cfg.maxSessions)
 	if err != nil {
 		return err
 	}
+	log.Printf("jaccld phase=resource_store done max_sessions=%d", cfg.maxSessions)
 	if cfg.controlPlaneLiveness > 0 {
 		go func() {
 			if err := resources.RunControlPlaneLiveness(ctx, cfg.controlPlaneLiveness); err != nil && !errors.Is(err, context.Canceled) {
@@ -114,6 +119,7 @@ func run(ctx context.Context, cfg config) error {
 		if err != nil {
 			return fmt.Errorf("reserve heartbeat bytes: %w", err)
 		}
+		log.Printf("jaccld phase=maintenance_lease done length=%d", heartbeat.Length)
 	}
 
 	var hw *hardware
@@ -137,10 +143,12 @@ func run(ctx context.Context, cfg config) error {
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
+		log.Printf("jaccld phase=daemon_transport start")
 		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat)
 		if err != nil {
 			return err
 		}
+		log.Printf("jaccld phase=daemon_transport done")
 		defer rdmaTransport.Close()
 		transport = rdmaTransport
 	}
@@ -149,6 +157,7 @@ func run(ctx context.Context, cfg config) error {
 	if err != nil {
 		return err
 	}
+	log.Printf("jaccld phase=ipc_listen start socket=%s", cfg.socket)
 	return server.ListenAndServe(ctx, cfg.socket)
 }
 
@@ -218,22 +227,33 @@ type hardware struct {
 }
 
 func openHardware(device string, slab *allocator.Slab) (*hardware, error) {
+	log.Printf("jaccld phase=hardware_open start device=%q", device)
 	dev, err := rdma.OpenDevice(device)
 	if err != nil {
 		return nil, err
 	}
+	log.Printf("jaccld phase=hardware_open device_done name=%q", dev.Name())
 	hw := &hardware{dev: dev}
 	defer func() {
 		if err != nil {
 			_ = hw.Close()
 		}
 	}()
+	log.Printf("jaccld phase=pd_alloc start")
 	if hw.pd, err = rdma.NewProtectionDomain(dev); err != nil {
 		return nil, err
 	}
+	log.Printf("jaccld phase=pd_alloc done")
+	log.Printf("jaccld phase=mr_register start length=%d", len(slab.Bytes()))
 	if hw.mr, err = rdma.RegisterMemory(hw.pd, slab.Bytes()); err != nil {
 		return nil, err
 	}
+	log.Printf("jaccld phase=mr_register done addr_nonzero=%t lkey_nonzero=%t rkey_nonzero=%t length=%d",
+		hw.mr.Addr() != 0,
+		hw.mr.LKey() != 0,
+		hw.mr.RKey() != 0,
+		len(hw.mr.Buffer()),
+	)
 	return hw, nil
 }
 

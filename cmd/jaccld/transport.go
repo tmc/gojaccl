@@ -123,10 +123,16 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 		if peer == t.rank {
 			continue
 		}
+		log.Printf("jaccld phase=qp_setup start peer=%d", peer)
 		conn, dst, err := openDaemonConn(hw)
 		if err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
+		log.Printf("jaccld phase=qp_setup done peer=%d qpn_nonzero=%t psn_nonzero=%t",
+			peer,
+			dst.QPN != 0,
+			dst.PSN != 0,
+		)
 		t.conns[peer] = conn
 		local[peer] = daemonDestination{QP: dst}
 		if t.tracker != nil {
@@ -142,10 +148,12 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 	if err != nil {
 		return fmt.Errorf("marshal destinations: %w", err)
 	}
+	log.Printf("jaccld phase=destination_exchange start")
 	allPayloads, err := t.side.AllGather(ctx, payload)
 	if err != nil {
 		return fmt.Errorf("exchange destinations: %w", err)
 	}
+	log.Printf("jaccld phase=destination_exchange gathered peers=%d", len(allPayloads))
 	all := make([][]daemonDestination, t.size)
 	for rank, data := range allPayloads {
 		if err := json.Unmarshal(data, &all[rank]); err != nil {
@@ -155,18 +163,21 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 			return fmt.Errorf("decode destinations from rank %d: got %d entries, want %d", rank, len(all[rank]), t.size)
 		}
 	}
+	log.Printf("jaccld phase=destination_exchange done")
 
 	for peer, conn := range t.conns {
 		if conn == nil {
 			continue
 		}
 		remote := all[peer][t.rank]
+		log.Printf("jaccld phase=rtr start peer=%d", peer)
 		if err := rdma.ReadyToReceive(conn.qp, remote.QP); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		if err := rdma.ReadyToSend(conn.qp, local[peer].QP.PSN); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
+		log.Printf("jaccld phase=rtr done peer=%d", peer)
 		if t.tracker != nil {
 			lease, err := validateRemoteHeartbeatDestination(remote, time.Now(), conn.remoteHeartbeat.MR.Epoch)
 			if err != nil {
@@ -189,9 +200,11 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 			}
 		}
 	}
+	log.Printf("jaccld phase=ready_barrier start")
 	if err := t.side.Barrier(ctx); err != nil {
 		return fmt.Errorf("ready barrier: %w", err)
 	}
+	log.Printf("jaccld phase=ready_barrier done")
 	return nil
 }
 
