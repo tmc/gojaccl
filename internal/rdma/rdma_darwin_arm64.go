@@ -213,34 +213,9 @@ func (q *QueuePair) number() uint32 {
 }
 
 func LocalDestination(qp *QueuePair) (Destination, error) {
-	if qp == nil || qp.handle == 0 || qp.pd == nil || qp.pd.dev == nil {
-		return Destination{}, fmt.Errorf("local destination: nil queue pair")
-	}
-	ctx := applerdma.RDMAContext(qp.pd.dev.handle)
-	var port applerdma.IbvPortAttr
-	if rc, err := applerdma.Ibv_query_port(ctx, 1, uintptr(unsafe.Pointer(&port))); err != nil {
-		return Destination{}, fmt.Errorf("query port: %w", err)
-	} else if rc != 0 {
-		return Destination{}, fmt.Errorf("query port: errno %d", rc)
-	}
-
-	var gid applerdma.IbvGID
-	gidIndex := 0
-	for i := 0; i < int(port.GIDTblLen); i++ {
-		var candidate applerdma.IbvGID
-		rc, err := applerdma.Ibv_query_gid(ctx, 1, i, uintptr(unsafe.Pointer(&candidate)))
-		if err != nil || rc != 0 {
-			continue
-		}
-		if isIPv4MappedGID(candidate) {
-			gid = candidate
-			gidIndex = i
-			break
-		}
-		if gid == ([16]byte{}) {
-			gid = candidate
-			gidIndex = i
-		}
+	port, gid, gidIndex, err := localPortGID(qp)
+	if err != nil {
+		return Destination{}, err
 	}
 	return Destination{
 		LID:      port.LID,
@@ -280,10 +255,17 @@ func ReadyToReceive(qp *QueuePair, dst Destination) error {
 		},
 	}
 	if dst.GID != ([16]byte{}) {
+		_, _, gidIndex, err := localPortGID(qp)
+		if err != nil {
+			return fmt.Errorf("local gid index: %w", err)
+		}
+		if gidIndex < 0 || gidIndex > 255 {
+			return fmt.Errorf("local gid index %d out of uint8 range", gidIndex)
+		}
 		attr.AHAttr.IsGlobal = 1
 		attr.AHAttr.GRH.HopLimit = 1
 		attr.AHAttr.GRH.DGID = applerdma.IbvGID(dst.GID)
-		attr.AHAttr.GRH.SGIDIndex = 1
+		attr.AHAttr.GRH.SGIDIndex = uint8(gidIndex)
 	}
 	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_AV | applerdma.IBV_QP_PATH_MTU | applerdma.IBV_QP_DEST_QPN | applerdma.IBV_QP_RQ_PSN
 	return modifyQueuePair(qp, &attr, mask, "RTR")
@@ -310,6 +292,39 @@ func modifyQueuePair(qp *QueuePair, attr *applerdma.IbvQPAttr, mask int, state s
 		return fmt.Errorf("change queue pair to %s: errno %d", state, rc)
 	}
 	return nil
+}
+
+func localPortGID(qp *QueuePair) (applerdma.IbvPortAttr, applerdma.IbvGID, int, error) {
+	if qp == nil || qp.handle == 0 || qp.pd == nil || qp.pd.dev == nil {
+		return applerdma.IbvPortAttr{}, applerdma.IbvGID{}, 0, fmt.Errorf("local destination: nil queue pair")
+	}
+	ctx := applerdma.RDMAContext(qp.pd.dev.handle)
+	var port applerdma.IbvPortAttr
+	if rc, err := applerdma.Ibv_query_port(ctx, 1, uintptr(unsafe.Pointer(&port))); err != nil {
+		return applerdma.IbvPortAttr{}, applerdma.IbvGID{}, 0, fmt.Errorf("query port: %w", err)
+	} else if rc != 0 {
+		return applerdma.IbvPortAttr{}, applerdma.IbvGID{}, 0, fmt.Errorf("query port: errno %d", rc)
+	}
+
+	var gid applerdma.IbvGID
+	gidIndex := 0
+	haveGID := false
+	for i := 0; i < int(port.GIDTblLen); i++ {
+		var candidate applerdma.IbvGID
+		rc, err := applerdma.Ibv_query_gid(ctx, 1, i, uintptr(unsafe.Pointer(&candidate)))
+		if err != nil || rc != 0 {
+			continue
+		}
+		if isIPv4MappedGID(candidate) {
+			return port, candidate, i, nil
+		}
+		if !haveGID {
+			gid = candidate
+			gidIndex = i
+			haveGID = true
+		}
+	}
+	return port, gid, gidIndex, nil
 }
 
 func isIPv4MappedGID(gid applerdma.IbvGID) bool {

@@ -190,3 +190,20 @@ func TestPureGoBoundary(t *testing.T) {
 		}
 	})
 }
+
+func TestRTRUsesDynamicSourceGIDIndex(t *testing.T) {
+	data, err := os.ReadFile("rdma_darwin_arm64.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(data)
+	if strings.Contains(src, "SGIDIndex = 1") {
+		t.Fatal("ReadyToReceive hard-codes SGIDIndex")
+	}
+	if !strings.Contains(src, "SGIDIndex = uint8(gidIndex)") {
+		t.Fatal("ReadyToReceive does not use the selected local gid index")
+	}
+	if !strings.Contains(src, "localPortGID(qp)") {
+		t.Fatal("ReadyToReceive does not query local port gid metadata")
+	}
+}
