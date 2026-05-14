@@ -79,29 +79,25 @@ route activity so a future heartbeat policy has a clear idle signal.
 The experimental RDMA-write heartbeat path is opt-in only with
 `-experimental-rdma-heartbeat`. It requires nonzero remote heartbeat address and
 rkey metadata, a positive `-heartbeat-timeout`, and a positive
-`-heartbeat-lease-ttl`; otherwise startup fails closed. Daemon peers exchange
-the real `HeartbeatMR{Addr,RKey,Length,Epoch}` for a byte reserved from the
-already-registered slab. This is the lease contract for RDMA-write heartbeat
-arming. The default daemon path does not require a nonzero rkey when the
-experimental heartbeat flag is disabled. The lease contract is not, by itself,
-evidence that long-lived idle QP keepalive safety is solved.
+`-heartbeat-lease-ttl`; otherwise startup fails closed. Physical Apple provider
+artifacts have shown registered memory with remote key zero, so RDMA-write is
+not the production keepalive direction for this provider.
 
-A production keepalive uses control-plane liveness as the default safety
-signal. The resource store records live-session activity and health without
-touching provider state, and those pulses do not extend lease expiry. An
-RDMA-write heartbeat may be armed only after the resource/session contract has
-a real `HeartbeatMR{Addr,RKey,Length,Epoch}` with nonzero address, rkey, and
-strictly positive length, and a nonzero epoch. It should not rely on
-Apple-provider zero rkeys.
+A production keepalive uses control-plane liveness as a health signal but not
+as proof that the data QP stayed warm. Background same-QP SEND/RECV heartbeats
+are rejected because receive matching is remote FIFO and WR IDs are local
+completion metadata, not wire tags. A remote user SEND can consume a locally
+posted heartbeat RECV, and a remote heartbeat SEND can consume a locally posted
+user RECV. Completion demux is still useful after completions arrive, but it
+does not make receive matching safe.
 
-When the experimental RDMA-write path is enabled, heartbeats post a bounded
-one-byte RDMA write to the remote heartbeat MR lease. The daemon keeps heartbeat
-completion polling serialized with the connection lock until a WR-ID demux
-exists. A heartbeat post followed by a poll error poisons the connection so
-later user traffic cannot consume a late heartbeat completion as user work.
 Heartbeat failures mark the route unhealthy without tearing down the
-daemon-owned device, protection domain, or registered memory region, and the
-tracker does not retry unhealthy routes.
+daemon-owned device, protection domain, or registered memory region. Any post,
+poll, timeout, or provider error poisons the route and must not start a retry
+loop. A dedicated heartbeat QP may prove daemon/provider/control-plane
+liveness, but it is not evidence that the user data QP stayed warm. A globally
+quiescent maintenance collective could safely run same-QP SEND/RECV traffic in
+theory, but that is not a background keepalive and is outside this slice.
 
 ## IPC Model
 
@@ -154,8 +150,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
-  transport over the registered slab, plus heartbeat MR lease exchange and the
-  gated experimental RDMA-write heartbeat hook.
+  transport over the registered slab, completion demux, heartbeat MR lease
+  exchange, and the gated experimental RDMA-write heartbeat hook.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
@@ -169,7 +165,8 @@ lease expiry. It does not decide tensor parallelism policy.
 
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
-Do not use SEND-based heartbeats on the data queue pair; they can consume user
-receives. Do not enable RDMA-write heartbeats unless the remote heartbeat memory
-window has a real nonzero address and rkey. Heartbeats must use RDMA write with
-a real heartbeat MR lease or an explicitly framed protocol.
+Do not use background SEND heartbeats on the data queue pair; they can consume
+user receives. Do not enable RDMA-write heartbeats unless the remote heartbeat
+memory window has a real nonzero address and rkey. Treat dedicated heartbeat
+QPs as liveness-only unless a separate proof shows they preserve idle data-QP
+health.

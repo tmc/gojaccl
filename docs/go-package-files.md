@@ -193,9 +193,9 @@ Files:
   fake senders and a fake clock.
 
 This package schedules daemon-owned keepalives. The production daemon does not
-post RDMA-write heartbeats by default; `jaccld` only adapts peer queue pairs
-with RDMA-write senders when the experimental heartbeat flag is enabled and a
-real nonzero remote heartbeat address and rkey are available.
+post RDMA-write heartbeats by default. `jaccld` uses this idle signal to decide
+when a provider-specific heartbeat policy should run, but Apple has no accepted
+background data-QP heartbeat yet.
 
 ## `gojaccl/cmd/jaccld`
 
@@ -208,9 +208,10 @@ Files:
   startup, daemon rank validation, heartbeat lease TTL validation, transport
   injection, and IPC listener startup.
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
-  exchange, queue-pair setup, slab-offset send, recv, collectives,
-  heartbeat MR lease exchange, gated experimental RDMA-write heartbeat setup,
-  heartbeat poison-on-error behavior, barrier, and transport close behavior.
+  exchange, queue-pair setup, slab-offset send, recv, collectives, completion
+  demux, heartbeat MR lease exchange, gated experimental RDMA-write heartbeat
+  setup, heartbeat poison-on-error behavior, barrier, and transport close
+  behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 - `transport_test.go`: hardware-free daemon collective offset and reduction
@@ -221,14 +222,13 @@ startup must validate `-rank`, `-size`, and `-coordinator`, open the hardware,
 register the single global slab, and connect peer daemon ranks before serving
 clients.
 
-Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
-peer receives and is not safe on the raw data queue pair. Do not enable
-RDMA-write heartbeats without a real nonzero remote heartbeat address, rkey,
-length, epoch, and live lease TTL.
-Keep heartbeat CQ polling serialized with the connection lock until a WR-ID
-demux exists. If a posted heartbeat cannot be polled to completion, poison the
-connection and fail later user traffic closed rather than risking late-CQE
-misattribution.
+Do not use background SEND heartbeats on the data queue pair. Receive matching
+is remote FIFO, and WR IDs cannot prevent heartbeat/user cross-matches.
+RDMA-write heartbeats remain experimental and fail closed on Apple-provider zero
+rkeys. If any heartbeat post or poll fails, poison the connection and fail later
+user traffic closed rather than risking late-CQE misattribution. Dedicated
+heartbeat QPs may be useful for liveness, but not as proof that the data QP
+stayed warm.
 
 ## Design Notes
 

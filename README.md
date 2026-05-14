@@ -69,10 +69,14 @@ smoke tests.
 
 Daemon-backed RDMA heartbeats are disabled by default. The current production
 path proves daemon-owned resource and data-path ownership, but not long-lived
-idle-QP keepalive safety. The experimental RDMA-write heartbeat path requires
-`-experimental-rdma-heartbeat`, a positive `-heartbeat-timeout`, a positive
-`-heartbeat-lease-ttl`, and nonzero remote heartbeat address, rkey, length, and
-epoch metadata; it fails closed when that metadata is missing.
+idle-QP keepalive safety. Apple Thunderbolt RDMA presents a two-sided
+SEND/RECV data path in practice, and observed registered memory keys have
+remote key zero. Background same-data-QP SEND/RECV heartbeats are rejected:
+receive matching is remote FIFO, and WR IDs are local completion metadata, not
+wire tags. The production behavior is TCP/control-plane liveness plus
+fail-closed datapath health until a provider-safe data-QP keepalive exists.
+The older RDMA-write heartbeat hook remains experimental and fails closed when
+the provider publishes a zero remote key.
 
 ## Dependency
 

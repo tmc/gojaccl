@@ -257,7 +257,20 @@ Daemon-backed RDMA heartbeats are disabled by default. The current daemon path
 proves daemon-owned resource and data-path ownership, not long-lived idle-QP
 keepalive safety. The experimental RDMA-write heartbeat hook is opt-in and must
 fail closed unless the peer publishes a real nonzero heartbeat address, rkey,
-length, and epoch from a live heartbeat lease. Control-plane liveness is the
-default safety signal until a real heartbeat MR lease exists. Do not replace
-this with SEND-based heartbeats; a SEND heartbeat can consume a user receive on
-the raw data queue pair.
+length, and epoch from a live heartbeat lease. Observed Apple Thunderbolt RDMA
+registrations publish rkey zero, so RDMA-write is not the production keepalive
+path for this provider.
+
+Control-plane liveness remains the default health signal, but it does not prove
+idle data-QP safety. Background same-data-QP SEND/RECV heartbeats are rejected:
+receive matching is remote FIFO, and WR IDs are local completion metadata, not
+wire tags. A remote user SEND can consume a local heartbeat RECV, and a remote
+heartbeat SEND can consume a local user RECV. Completion demux remains useful
+for normal traffic correctness after a completion is produced, but it cannot
+make receive-queue matching safe.
+
+A globally quiescent maintenance collective could run same-QP SEND/RECV traffic
+only after all ranks stop admitting user operations, hold the relevant endpoint
+locks, and prove outstanding protocol work completed. That is not a background
+keepalive. A dedicated heartbeat QP may prove daemon/provider/control-plane
+liveness, but it does not prove the user data QP stayed warm.

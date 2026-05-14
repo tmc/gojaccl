@@ -2,8 +2,9 @@
 
 `jaccld` must keep long-lived daemon routes observable without letting a
 client request path allocate or probe RDMA resources. The production safety
-signal is control-plane liveness. RDMA-write heartbeats remain disabled unless
-the daemon has a real remote heartbeat memory lease.
+signal is control-plane liveness. Control-plane liveness proves daemon reach,
+not idle data-QP health. No background data-QP heartbeat is accepted for Apple
+Thunderbolt RDMA yet.
 
 ## Default Signal
 
@@ -16,9 +17,10 @@ the admission contract, not a health timestamp.
 helpers. They do not import the RDMA provider, inspect queue pairs, poll
 completion queues, or post work requests. They only update live lease metadata.
 
-## RDMA Heartbeat Lease
+## RDMA-Write Lease
 
-An RDMA heartbeat may be armed only from an explicit heartbeat memory lease:
+The earlier RDMA-write experiment may be armed only from an explicit heartbeat
+memory lease:
 
 ```go
 type HeartbeatMR struct {
@@ -30,9 +32,9 @@ type HeartbeatMR struct {
 ```
 
 `Addr`, `RKey`, `Length`, and `Epoch` must all be nonzero, and `Length` must be
-positive. A zero `Addr` or zero `RKey` fails closed before any future
-RDMA-write heartbeat can be armed. A lease must also still be live at the time
-the heartbeat metadata is requested.
+positive. A zero `Addr` or zero `RKey` fails closed before any RDMA-write
+heartbeat can be armed. A lease must also still be live at the time the
+heartbeat metadata is requested.
 
 The resource package records this contract with `SessionRequest.HeartbeatMR`,
 `SessionLease.HeartbeatMR`, and `SessionLease.RDMAHeartbeatMR`. It does not
@@ -47,19 +49,34 @@ arming an RDMA heartbeat. This exchange only happens when
 `-experimental-rdma-heartbeat` is enabled; the default daemon data path does
 not require a nonzero remote memory key.
 
+Apple Thunderbolt RDMA has so far published zero rkeys in physical proof
+artifacts, even when the local registration requested remote access. That means
+RDMA-write keepalive is not the production direction for this provider.
+
+## Rejected Background Heartbeats
+
+Asynchronous same-QP SEND/RECV heartbeats are rejected. RDMA receive matching is
+remote FIFO; WR IDs are local completion metadata and do not tag messages on
+the wire. A daemon cannot make a 1-byte heartbeat receive safe merely by taking
+its local `conn.mu` and assigning a heartbeat WR ID.
+
+The concrete failure mode is a cross-match between heartbeat and user traffic:
+a remote user SEND can consume a locally posted heartbeat RECV, or a remote
+heartbeat SEND can consume a locally posted user RECV. Either case corrupts or
+poisons the data QP. Completion demux is still useful after a completion
+arrives, but it cannot change receive-queue matching.
+
+A globally quiescent maintenance operation could make same-QP SEND/RECV traffic
+safe in theory: all ranks would have to stop admitting user operations, hold
+the relevant endpoint locks, prove all outstanding protocol sends and receives
+completed, run the heartbeat as an explicit collective, and then reopen user
+traffic. That is not a background keepalive and is outside the current slice.
+
+A dedicated heartbeat QP may be useful as daemon/provider/control-plane
+liveness, but it does not prove the user data QP stayed warm.
+
 ## Deferred Work
 
-The RDMA-write keepalive execution path remains gated behind
-`-experimental-rdma-heartbeat` until the physical proof passes. When enabled it
-posts a bounded one-byte RDMA write to the remote heartbeat MR lease, serializes
-CQ polling with the connection lock, and records success/error counters in the
-heartbeat tracker and daemon logs. If a heartbeat post is followed by a poll
-error or timeout, the connection is poisoned and later user traffic fails closed
-until daemon restart. The tracker does not retry an unhealthy route.
-
-The remaining proof work is a two-host long-idle run that demonstrates those
-heartbeats keep Apple Thunderbolt RDMA queue pairs usable beyond the known idle
-failure window.
-
-Do not replace this with SEND-based heartbeats on the data queue pair, and do
-not treat an Apple-provider zero rkey as a valid heartbeat destination.
+The production behavior remains TCP/control-plane liveness plus fail-closed
+datapath health. The remaining open problem is a provider-safe way to keep the
+actual data QP warm without consuming application receive FIFO entries.
