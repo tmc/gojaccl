@@ -253,8 +253,9 @@ supports barrier, send, recv, and daemon-supported collectives through slab
 leases. Collective IPC uses a deliberate asynchronous work model: clients submit
 work and then wait on a work ID.
 
-The daemon uses RDMA-write heartbeats for the Apple idle-QP failure. Each daemon
-reserves one byte in the registered slab, publishes that address and rkey with
-its queue-pair destination metadata, and writes one byte to each idle peer route
-at the heartbeat interval. Do not replace this with SEND-based heartbeats; a
-SEND heartbeat can consume a user receive on the raw data queue pair.
+Daemon-backed RDMA heartbeats are disabled by default. The current daemon path
+proves daemon-owned resource and data-path ownership, not long-lived idle-QP
+keepalive safety. The experimental RDMA-write heartbeat hook is opt-in and must
+fail closed unless the peer publishes a real nonzero heartbeat address and rkey.
+Do not replace this with SEND-based heartbeats; a SEND heartbeat can consume a
+user receive on the raw data queue pair.

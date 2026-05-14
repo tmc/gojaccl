@@ -108,12 +108,13 @@ Command jaccld owns local Apple RDMA resources for jaccl clients.
 Each daemon rank is started with -rank, -size, and -coordinator unless -no-rdma
 is set. The daemon opens one RDMA device, allocates one protection domain,
 registers one shared slab memory region, creates queue pairs for peer daemon
-ranks, starts RDMA-write heartbeats, starts a bounded resource session store,
-and serves local clients through a Unix-domain socket. The daemon transport
-supports barrier, send, and recv over leased slab offsets.
+ranks, starts a bounded resource session store, and serves local clients
+through a Unix-domain socket. The daemon transport supports barrier, send, recv,
+and daemon-supported collectives over leased slab offsets.
 
-Idle heartbeats use one-byte RDMA writes to a reserved slab byte published by
-each peer daemon. They do not consume peer receive work requests.
+Daemon-backed RDMA heartbeats are disabled by default. The experimental
+RDMA-write heartbeat hook requires explicit opt-in and nonzero remote heartbeat
+address and rkey metadata.
 
 == gojaccl/internal/allocator ==
 
@@ -194,7 +195,8 @@ package keepalive // import "./internal/keepalive"
 
 Package keepalive tracks idle routes that need daemon-owned heartbeats.
 
-The package schedules idle RDMA-write heartbeats for jaccld peer routes.
+The package schedules idle keepalives for jaccld peer routes. The production
+daemon does not post RDMA-write heartbeats by default.
 
 type Sender interface{ ... }
 type SenderFunc func(context.Context) error

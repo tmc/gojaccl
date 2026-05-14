@@ -57,7 +57,7 @@ do not run the RTR gate casually.
 A daemon rank is started with explicit rank metadata:
 
 ```sh
-jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000 -heartbeat 1m
+jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
 ```
 
 Daemon-backed integration tests use the same `TestIntegrationChild` helper as
@@ -67,10 +67,12 @@ the local daemon socket for each rank.
 `-no-rdma` starts only the IPC server and slab allocator for hardware-free
 smoke tests.
 
-The daemon reserves one byte in the shared slab and exchanges the registered MR
-address and rkey with peer daemons. Idle heartbeats use RDMA write to that
-reserved byte so they do not consume peer receive work requests or corrupt user
-payloads.
+Daemon-backed RDMA heartbeats are disabled by default. The current production
+path proves daemon-owned resource and data-path ownership, but not long-lived
+idle-QP keepalive safety. The experimental RDMA-write heartbeat path requires
+`-experimental-rdma-heartbeat`, a positive `-heartbeat-timeout`, and nonzero
+remote heartbeat address and rkey metadata; it fails closed when that metadata
+is missing.
 
 ## Dependency
 

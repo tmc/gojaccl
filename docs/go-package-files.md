@@ -192,8 +192,10 @@ Files:
 - `heartbeat_test.go`: idle, touch, error, and bad-input tests using fake
   senders and a fake clock.
 
-This package schedules daemon-owned keepalives. `jaccld` adapts peer queue
-pairs with RDMA-write senders that target a reserved slab byte.
+This package schedules daemon-owned keepalives. The production daemon does not
+post RDMA-write heartbeats by default; `jaccld` only adapts peer queue pairs
+with RDMA-write senders when the experimental heartbeat flag is enabled and a
+real nonzero remote heartbeat address and rkey are available.
 
 ## `gojaccl/cmd/jaccld`
 
@@ -207,7 +209,8 @@ Files:
   startup.
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives,
-  RDMA-write heartbeat setup, barrier, and transport close behavior.
+  gated experimental RDMA-write heartbeat setup, barrier, and transport close
+  behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 - `transport_test.go`: hardware-free daemon collective offset and reduction
@@ -219,7 +222,8 @@ register the single global slab, and connect peer daemon ranks before serving
 clients.
 
 Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
-peer receives and is not safe on the raw data queue pair.
+peer receives and is not safe on the raw data queue pair. Do not enable
+RDMA-write heartbeats without a real nonzero remote heartbeat address and rkey.
 
 ## Files Not To Add Yet
 

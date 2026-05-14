@@ -37,7 +37,8 @@ On startup, `jaccld`:
 4. Creates and registers one shared memory slab.
 5. Creates queue pairs for the other daemon ranks and exchanges destinations
    on the TCP side channel.
-6. Starts RDMA-write heartbeat management for active queue pairs.
+6. Optionally starts experimental RDMA-write heartbeat management for active
+   queue pairs.
 7. Starts a bounded resource session store for local clients.
 8. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
 
@@ -70,15 +71,21 @@ within the one registered memory region.
 ## Keepalive Model
 
 Apple's Thunderbolt RDMA provider requires active traffic to prevent queue-pair
-degradation after roughly 23 minutes. The daemon reserves one byte in its
-registered slab and publishes that byte's registered address and rkey with the
-queue-pair destination metadata.
+degradation after roughly 23 minutes, but daemon-backed RDMA heartbeats are not
+enabled in the production path yet. The default daemon does not post heartbeat
+work requests on the data queue pair. Successful user traffic still refreshes
+route activity so a future heartbeat policy has a clear idle signal.
 
-Each active peer route has a last-activity timestamp. When a route is idle for
-the configured interval, the daemon posts a one-byte RDMA write to the peer's
-reserved sink byte and waits for the local completion. This keeps the data queue
-pair active without consuming peer receive work requests and without writing
-into user payload buffers.
+The experimental RDMA-write heartbeat path is opt-in only with
+`-experimental-rdma-heartbeat`. It requires nonzero remote heartbeat address and
+rkey metadata and a positive `-heartbeat-timeout`; otherwise startup fails
+closed. This path is a staging hook for a future session contract that leases a
+dedicated remote heartbeat MR window. It is not evidence that long-lived idle QP
+keepalive safety is solved.
+
+A production keepalive should either use control-plane liveness or a real
+heartbeat MR lease negotiated through the resource/session contract. It should
+not rely on Apple-provider zero rkeys.
 
 ## IPC Model
 
@@ -131,7 +138,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
-  transport over the registered slab.
+  transport over the registered slab, plus the gated experimental RDMA-write
+  heartbeat hook.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.
@@ -144,4 +152,6 @@ lease expiry. It does not decide tensor parallelism policy.
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
 Do not use SEND-based heartbeats on the data queue pair; they can consume user
-receives. Heartbeats must use RDMA write or an explicitly framed protocol.
+receives. Do not enable RDMA-write heartbeats unless the remote heartbeat memory
+window has a real nonzero address and rkey. Heartbeats must use RDMA write with
+a real heartbeat MR lease or an explicitly framed protocol.

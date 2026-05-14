@@ -88,8 +88,11 @@ func TestDaemonTransportCollectiveValidation(t *testing.T) {
 	}
 }
 
-func TestHeartbeatAddressAllowsZeroRKey(t *testing.T) {
-	addr, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 0, HeartbeatOffset: 7})
+func TestHeartbeatAddressRequiresRKey(t *testing.T) {
+	if _, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 0, HeartbeatOffset: 7}); err == nil {
+		t.Fatal("heartbeatAddress with zero rkey = nil")
+	}
+	addr, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 9, HeartbeatOffset: 7})
 	if err != nil {
 		t.Fatal(err)
 	}

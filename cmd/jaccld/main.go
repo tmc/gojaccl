@@ -30,7 +30,9 @@ func main() {
 	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
 	flag.IntVar(&cfg.maxSessions, "max-sessions", 128, "maximum local resource sessions")
-	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "idle queue-pair heartbeat interval")
+	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "experimental RDMA heartbeat interval")
+	flag.DurationVar(&cfg.heartbeatTimeout, "heartbeat-timeout", time.Second, "maximum experimental RDMA heartbeat completion wait")
+	flag.BoolVar(&cfg.experimentalRDMAHeartbeat, "experimental-rdma-heartbeat", false, "post experimental RDMA-write heartbeats")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
 
@@ -42,15 +44,17 @@ func main() {
 }
 
 type config struct {
-	socket      string
-	device      string
-	rank        int
-	size        int
-	coordinator string
-	slabSize    int64
-	maxSessions int
-	heartbeat   time.Duration
-	noRDMA      bool
+	socket                    string
+	device                    string
+	rank                      int
+	size                      int
+	coordinator               string
+	slabSize                  int64
+	maxSessions               int
+	heartbeat                 time.Duration
+	heartbeatTimeout          time.Duration
+	experimentalRDMAHeartbeat bool
+	noRDMA                    bool
 }
 
 func run(ctx context.Context, cfg config) error {
@@ -96,7 +100,7 @@ func run(ctx context.Context, cfg config) error {
 	}
 
 	var tracker *keepalive.Tracker
-	if hw != nil {
+	if hw != nil && cfg.experimentalRDMAHeartbeat {
 		tracker, err = keepalive.New(cfg.heartbeat)
 		if err != nil {
 			return err
@@ -107,7 +111,7 @@ func run(ctx context.Context, cfg config) error {
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
-		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat.Offset)
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat.Offset, cfg.heartbeatTimeout)
 		if err != nil {
 			return err
 		}
@@ -169,8 +173,11 @@ func (cfg config) validateRDMA() error {
 	if strings.TrimSpace(cfg.coordinator) == "" {
 		return fmt.Errorf("coordinator is empty")
 	}
-	if cfg.heartbeat <= 0 {
+	if cfg.experimentalRDMAHeartbeat && cfg.heartbeat <= 0 {
 		return fmt.Errorf("heartbeat interval %s must be positive", cfg.heartbeat)
+	}
+	if cfg.experimentalRDMAHeartbeat && cfg.heartbeatTimeout <= 0 {
+		return fmt.Errorf("heartbeat timeout %s must be positive", cfg.heartbeatTimeout)
 	}
 	return nil
 }

@@ -40,9 +40,18 @@ func TestConfigValidateRDMA(t *testing.T) {
 			want: "coordinator is empty",
 		},
 		{
-			name: "zero heartbeat",
+			name: "zero heartbeat without experimental RDMA heartbeat",
 			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345"},
+		},
+		{
+			name: "experimental zero heartbeat",
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", experimentalRDMAHeartbeat: true},
 			want: "heartbeat interval 0s must be positive",
+		},
+		{
+			name: "experimental zero heartbeat timeout",
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second, experimentalRDMAHeartbeat: true},
+			want: "heartbeat timeout 0s must be positive",
 		},
 	}
 	for _, tt := range tests {
