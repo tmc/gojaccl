@@ -219,6 +219,22 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 				continue
 			}
 			_ = writeControl(conn, Response{OK: true, Session: lease}, nil)
+		case opSessionLookup:
+			if s.resources == nil {
+				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)
+				continue
+			}
+			id := resource.LeaseID(req.SessionID)
+			if !sessions[id] {
+				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
+				continue
+			}
+			lease, ok := s.resources.Lookup(id)
+			if !ok {
+				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
+				continue
+			}
+			_ = writeControl(conn, Response{OK: true, Session: lease}, nil)
 		case opSessionClose:
 			if s.resources == nil {
 				_ = writeControl(conn, Response{Error: resource.ErrNotReady.Error()}, nil)

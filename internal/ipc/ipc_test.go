@@ -198,6 +198,20 @@ func TestClientSessionLifecycle(t *testing.T) {
 	if stats.Leases != 1 || stats.MemoryRegions.InUse != 1 || stats.QueuePairs.InUse != 1 || stats.CompletionQueues.InUse != 1 {
 		t.Fatalf("resource stats after open = %+v, want one live session", stats)
 	}
+	if n := store.PulseControlPlane(); n != 1 {
+		t.Fatalf("PulseControlPlane = %d, want 1", n)
+	}
+	want, ok := store.Lookup(lease.ID)
+	if !ok {
+		t.Fatal("store lost session")
+	}
+	looked, err := client.LookupSession(context.Background(), lease.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !looked.LastActivity.Equal(want.LastActivity) || looked.Healthy != want.Healthy || !looked.ExpiresAt.Equal(want.ExpiresAt) {
+		t.Fatalf("lookup session = %+v, want liveness fields from %+v", looked, want)
+	}
 	refreshed, err := client.RefreshSession(context.Background(), lease.ID, deadline.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -207,6 +221,9 @@ func TestClientSessionLifecycle(t *testing.T) {
 	}
 	if err := client.CloseSession(context.Background(), lease.ID); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := client.LookupSession(context.Background(), lease.ID); err == nil || !strings.Contains(err.Error(), resource.ErrLeaseNotFound.Error()) {
+		t.Fatalf("LookupSession after close = %v, want ErrLeaseNotFound", err)
 	}
 	if stats := store.Stats(); stats.Leases != 0 || stats.MemoryRegions.InUse != 0 || stats.QueuePairs.InUse != 0 || stats.CompletionQueues.InUse != 0 {
 		t.Fatalf("resource stats after close = %+v, want empty", stats)
@@ -258,6 +275,9 @@ func TestClientSessionOpsNeedResourceStore(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), resource.ErrNotReady.Error()) {
 		t.Fatalf("OpenSession without store = %v, want ErrNotReady", err)
+	}
+	if _, err := client.LookupSession(context.Background(), 1); err == nil || !strings.Contains(err.Error(), resource.ErrNotReady.Error()) {
+		t.Fatalf("LookupSession without store = %v, want ErrNotReady", err)
 	}
 }
 

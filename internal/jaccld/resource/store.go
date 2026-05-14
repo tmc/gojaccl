@@ -213,7 +213,7 @@ func (s *Store) RunControlPlaneLiveness(ctx context.Context, interval time.Durat
 	}
 }
 
-// Lookup reports a live session lease by ID.
+// Lookup reports a session lease by ID.
 func (s *Store) Lookup(id LeaseID) (SessionLease, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

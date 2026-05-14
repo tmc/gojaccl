@@ -229,6 +229,16 @@ func (c *Client) RefreshSession(ctx context.Context, id resource.LeaseID, deadli
 	return resp.Session, nil
 }
 
+// LookupSession returns the current metadata for a resource session lease.
+func (c *Client) LookupSession(ctx context.Context, id resource.LeaseID) (resource.SessionLease, error) {
+	resp, fds, err := c.do(ctx, Request{Op: opSessionLookup, SessionID: uint64(id)})
+	closeFDs(fds)
+	if err != nil {
+		return resource.SessionLease{}, err
+	}
+	return resp.Session, nil
+}
+
 // CloseSession releases a daemon resource session lease.
 func (c *Client) CloseSession(ctx context.Context, id resource.LeaseID) error {
 	_, fds, err := c.do(ctx, Request{Op: opSessionClose, SessionID: uint64(id)})

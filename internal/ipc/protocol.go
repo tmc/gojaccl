@@ -29,6 +29,7 @@ const (
 	// alloc/free, which only lease raw staging ranges in the shared slab.
 	opSessionOpen    = "session_open"
 	opSessionRefresh = "session_refresh"
+	opSessionLookup  = "session_lookup"
 	opSessionClose   = "session_close"
 	opSessionStats   = "session_stats"
 
