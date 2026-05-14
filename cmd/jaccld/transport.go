@@ -52,12 +52,15 @@ type daemonDestination struct {
 
 type daemonExchangeFunc func(context.Context, int64, int64, int64) error
 
-func openDaemonTransport(ctx context.Context, cfg config, slab *allocator.Slab, hw *hardware, tracker *keepalive.Tracker, heartbeatOffset int64) (*daemonTransport, error) {
+func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel, slab *allocator.Slab, hw *hardware, tracker *keepalive.Tracker, heartbeatOffset int64) (*daemonTransport, error) {
 	if hw == nil || hw.dev == nil || hw.pd == nil || hw.mr == nil {
 		return nil, fmt.Errorf("open daemon transport: nil hardware")
 	}
 	if slab == nil {
 		return nil, fmt.Errorf("open daemon transport: nil slab")
+	}
+	if side == nil {
+		return nil, fmt.Errorf("open daemon transport: nil side channel")
 	}
 	t := &daemonTransport{
 		rank:            cfg.rank,
@@ -68,18 +71,14 @@ func openDaemonTransport(ctx context.Context, cfg config, slab *allocator.Slab, 
 		heartbeatOffset: heartbeatOffset,
 		conns:           make([]*daemonConn, cfg.size),
 	}
-	if err := t.open(ctx, cfg, hw); err != nil {
+	if err := t.open(ctx, cfg, hw, side); err != nil {
 		_ = t.Close()
 		return nil, err
 	}
 	return t, nil
 }
 
-func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware) error {
-	side, err := tcpchan.New(ctx, cfg.rank, cfg.size, cfg.coordinator)
-	if err != nil {
-		return fmt.Errorf("side channel: %w", err)
-	}
+func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, side *tcpchan.Channel) error {
 	t.side = side
 
 	local := make([]daemonDestination, t.size)

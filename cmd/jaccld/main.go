@@ -18,6 +18,7 @@ import (
 	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
+	"github.com/tmc/gojaccl/internal/tcpchan"
 )
 
 func main() {
@@ -58,6 +59,15 @@ func run(ctx context.Context, cfg config) error {
 			return err
 		}
 	}
+	var side *tcpchan.Channel
+	if !cfg.noRDMA {
+		var err error
+		side, err = tcpchan.New(ctx, cfg.rank, cfg.size, cfg.coordinator)
+		if err != nil {
+			return fmt.Errorf("side channel: %w", err)
+		}
+		defer side.Close()
+	}
 	slab, err := allocator.NewSlab("", cfg.slabSize)
 	if err != nil {
 		return err
@@ -97,7 +107,7 @@ func run(ctx context.Context, cfg config) error {
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
-		rdmaTransport, err = openDaemonTransport(ctx, cfg, slab, hw, tracker, heartbeat.Offset)
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat.Offset)
 		if err != nil {
 			return err
 		}
