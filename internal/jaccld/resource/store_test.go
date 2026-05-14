@@ -337,6 +337,44 @@ func TestStoreTouch(t *testing.T) {
 	}
 }
 
+func TestStoreLookupLive(t *testing.T) {
+	store, _ := newTestStore(t)
+	now := time.Unix(100, 0)
+	store.now = func() time.Time { return now }
+	if _, err := store.LookupLive(1); !errors.Is(err, ErrNotReady) {
+		t.Fatalf("LookupLive before ready = %v, want ErrNotReady", err)
+	}
+	if err := store.SetState(StateReady); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LookupLive(0); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("LookupLive zero = %v, want ErrInvalidRequest", err)
+	}
+	if _, err := store.LookupLive(1); !errors.Is(err, ErrLeaseNotFound) {
+		t.Fatalf("LookupLive missing = %v, want ErrLeaseNotFound", err)
+	}
+	lease, err := store.Open(context.Background(), SessionRequest{
+		ClientID: "client",
+		Peer:     PeerSpec{Rank: 1},
+		Size:     8,
+		Deadline: now.Add(time.Second),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.LookupLive(lease.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != lease.ID {
+		t.Fatalf("LookupLive id = %d, want %d", got.ID, lease.ID)
+	}
+	now = now.Add(time.Second)
+	if _, err := store.LookupLive(lease.ID); !errors.Is(err, ErrExpired) {
+		t.Fatalf("LookupLive expired = %v, want ErrExpired", err)
+	}
+}
+
 func TestStoreControlPlaneLivenessDoesNotRefreshExpiry(t *testing.T) {
 	store, _ := newTestStore(t)
 	now := time.Unix(100, 0)

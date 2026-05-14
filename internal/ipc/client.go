@@ -229,7 +229,7 @@ func (c *Client) RefreshSession(ctx context.Context, id resource.LeaseID, deadli
 	return resp.Session, nil
 }
 
-// LookupSession returns the current metadata for a resource session lease.
+// LookupSession returns current metadata for a live resource session lease.
 func (c *Client) LookupSession(ctx context.Context, id resource.LeaseID) (resource.SessionLease, error) {
 	resp, fds, err := c.do(ctx, Request{Op: opSessionLookup, SessionID: uint64(id)})
 	closeFDs(fds)

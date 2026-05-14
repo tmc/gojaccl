@@ -221,6 +221,27 @@ func (s *Store) Lookup(id LeaseID) (SessionLease, bool) {
 	return lease, ok
 }
 
+// LookupLive reports a non-expired session lease by ID.
+func (s *Store) LookupLive(id LeaseID) (SessionLease, error) {
+	now := s.now()
+	if id == 0 {
+		return SessionLease{}, fmt.Errorf("%w: lease id is zero", ErrInvalidRequest)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateReady {
+		return SessionLease{}, ErrNotReady
+	}
+	lease, ok := s.leases[id]
+	if !ok {
+		return SessionLease{}, ErrLeaseNotFound
+	}
+	if !lease.ExpiresAt.After(now) {
+		return SessionLease{}, ErrExpired
+	}
+	return lease, nil
+}
+
 // Close releases one session lease.
 func (s *Store) Close(ctx context.Context, id LeaseID) error {
 	if ctx == nil {

@@ -229,9 +229,9 @@ func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {
 				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
 				continue
 			}
-			lease, ok := s.resources.Lookup(id)
-			if !ok {
-				_ = writeControl(conn, Response{Error: resource.ErrLeaseNotFound.Error()}, nil)
+			lease, err := s.resources.LookupLive(id)
+			if err != nil {
+				_ = writeControl(conn, Response{Error: err.Error()}, nil)
 				continue
 			}
 			_ = writeControl(conn, Response{OK: true, Session: lease}, nil)

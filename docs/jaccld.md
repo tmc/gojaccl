@@ -116,8 +116,8 @@ protocol is intentionally small:
 - `barrier`: ask the daemon transport to synchronize active peers.
 - `session_open`: lease a daemon-owned logical MR window and route handles.
 - `session_refresh`: extend a session lease deadline.
-- `session_lookup`: return current session lease metadata, including
-  provider-free liveness fields.
+- `session_lookup`: return current live session lease metadata, including
+  provider-free liveness fields; expired leases fail closed.
 - `session_close`: release a session lease.
 - `session_stats`: return resource-store use.
 - `submit_reduce`: start daemon-owned all-reduce work over leased slab ranges.

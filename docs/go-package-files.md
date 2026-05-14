@@ -142,7 +142,7 @@ Files:
 
 - `protocol.go`: small JSON control protocol shared by client and server,
   including slab lease, map, stats, barrier, send, recv, and resource session
-  operations including session lookup.
+  operations including live session lookup.
 - `server.go`: Unix-domain socket server, `alloc`, `free`, `map`, `stats`, and
   `SCM_RIGHTS` file descriptor passing, resource session lifecycle dispatch,
   plus data-path dispatch through an injected `Transport`.
@@ -168,8 +168,8 @@ Files:
   session leases, handles, stats, and errors.
 - `pool.go`: provider-free MR, queue-pair, and completion-queue pool
   interfaces.
-- `store.go`: session lease store, state transitions, open, refresh, lookup,
-  close, provider-free liveness, expiry, cleanup, and stats.
+- `store.go`: session lease store, state transitions, open, refresh, live
+  lookup, close, provider-free liveness, expiry, cleanup, and stats.
 - `slab.go`: allocator-backed MR window pool.
 - `handle.go`: bounded static queue-pair and completion-queue handle pools for
   offline session accounting.
