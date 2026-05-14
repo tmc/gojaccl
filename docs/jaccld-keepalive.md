@@ -47,10 +47,15 @@ arming an RDMA heartbeat.
 
 ## Deferred Work
 
-Actual RDMA-write keepalive execution remains a later two-host gated slice. It
-needs a remote heartbeat MR lease negotiated between daemon peers and a poll
-path that can account for heartbeat completions without consuming user
-completions incorrectly.
+The RDMA-write keepalive execution path remains gated behind
+`-experimental-rdma-heartbeat` until the physical proof passes. When enabled it
+posts a bounded one-byte RDMA write to the remote heartbeat MR lease, serializes
+CQ polling with the connection lock, and records success/error counters in the
+heartbeat tracker and daemon logs.
+
+The remaining proof work is a two-host long-idle run that demonstrates those
+heartbeats keep Apple Thunderbolt RDMA queue pairs usable beyond the known idle
+failure window.
 
 Do not replace this with SEND-based heartbeats on the data queue pair, and do
 not treat an Apple-provider zero rkey as a valid heartbeat destination.

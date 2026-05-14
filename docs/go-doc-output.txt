@@ -209,6 +209,8 @@ type Status struct{ ... }
 type Tracker struct{ ... }
     func New(interval time.Duration) (*Tracker, error)
 
+Status includes heartbeat attempt and error counters for proof artifacts.
+
 == gojaccl/internal/rdma ==
 
 $ go doc .

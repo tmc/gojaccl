@@ -90,7 +90,14 @@ signal. The resource store records live-session activity and health without
 touching provider state, and those pulses do not extend lease expiry. An
 RDMA-write heartbeat may be armed only after the resource/session contract has
 a real `HeartbeatMR{Addr,RKey,Length,Epoch}` with nonzero address, rkey, and
-length, and epoch. It should not rely on Apple-provider zero rkeys.
+strictly positive length, and a nonzero epoch. It should not rely on
+Apple-provider zero rkeys.
+
+When the experimental RDMA-write path is enabled, heartbeats post a bounded
+one-byte RDMA write to the remote heartbeat MR lease. The daemon keeps heartbeat
+completion polling serialized with the connection lock until a WR-ID demux
+exists, and heartbeat failures mark the route unhealthy without tearing down the
+daemon-owned device, protection domain, or registered memory region.
 
 ## IPC Model
 

@@ -189,8 +189,8 @@ Package name: `keepalive`.
 Files:
 
 - `heartbeat.go`: idle-route tracker and heartbeat sender abstraction.
-- `heartbeat_test.go`: idle, touch, error, and bad-input tests using fake
-  senders and a fake clock.
+- `heartbeat_test.go`: idle, touch, error counter, and bad-input tests using
+  fake senders and a fake clock.
 
 This package schedules daemon-owned keepalives. The production daemon does not
 post RDMA-write heartbeats by default; `jaccld` only adapts peer queue pairs
@@ -225,6 +225,8 @@ Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
 peer receives and is not safe on the raw data queue pair. Do not enable
 RDMA-write heartbeats without a real nonzero remote heartbeat address, rkey,
 length, epoch, and live lease TTL.
+Keep heartbeat CQ polling serialized with the connection lock until a WR-ID
+demux exists.
 
 ## Design Notes
 

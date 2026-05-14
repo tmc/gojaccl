@@ -41,6 +41,9 @@ func TestTrackerBeatsIdleRoutes(t *testing.T) {
 	if !st.Healthy || st.LastError != "" {
 		t.Fatalf("status = %+v, want healthy", st)
 	}
+	if st.Beats != 1 || st.Errors != 0 {
+		t.Fatalf("status counters = %+v, want one beat no errors", st)
+	}
 	if st.LastActivity != now || st.LastBeat != now {
 		t.Fatalf("status times = %+v, want %s", st, now)
 	}
@@ -101,6 +104,9 @@ func TestTrackerRecordsHeartbeatError(t *testing.T) {
 	}
 	if st.Healthy || st.LastError != want.Error() {
 		t.Fatalf("status = %+v, want unhealthy error", st)
+	}
+	if st.Beats != 1 || st.Errors != 1 {
+		t.Fatalf("status counters = %+v, want one beat one error", st)
 	}
 }
 

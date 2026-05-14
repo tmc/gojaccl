@@ -27,6 +27,8 @@ type Status struct {
 	LastBeat     time.Time
 	LastError    string
 	Healthy      bool
+	Beats        uint64
+	Errors       uint64
 }
 
 type route struct {
@@ -170,9 +172,11 @@ func (t *Tracker) recordBeat(id string, err error) {
 	}
 	now := t.now()
 	r.status.LastBeat = now
+	r.status.Beats++
 	if err != nil {
 		r.status.LastError = err.Error()
 		r.status.Healthy = false
+		r.status.Errors++
 		return
 	}
 	r.status.LastActivity = now

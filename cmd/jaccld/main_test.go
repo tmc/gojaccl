@@ -20,6 +20,10 @@ func TestConfigValidateRDMA(t *testing.T) {
 			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 		},
 		{
+			name: "valid experimental heartbeat",
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second, heartbeatTimeout: time.Second, heartbeatLeaseTTL: time.Hour, experimentalRDMAHeartbeat: true},
+		},
+		{
 			name: "negative rank",
 			cfg:  config{rank: -1, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second},
 			want: "rank -1 out of range",

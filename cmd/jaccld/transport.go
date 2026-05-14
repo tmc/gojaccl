@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -521,28 +522,32 @@ func (t *daemonTransport) bytes() []byte {
 }
 
 func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
-	offset, err := t.localHeartbeatOffset()
-	if err != nil {
-		return err
-	}
-	start, _, err := t.rangeInMR(offset, 1)
-	if err != nil {
-		return err
-	}
 	conn, err := t.conn(peer)
 	if err != nil {
 		return err
 	}
+	offset, err := t.localHeartbeatOffset()
+	if err != nil {
+		conn.recordHeartbeat(peer, err)
+		return err
+	}
+	start, _, err := t.rangeInMR(offset, 1)
+	if err != nil {
+		conn.recordHeartbeat(peer, err)
+		return err
+	}
 	remote, err := conn.remoteHeartbeat.RDMA(time.Now())
 	if err != nil {
-		return fmt.Errorf("rank %d heartbeat target: %w", peer, err)
+		err = fmt.Errorf("rank %d heartbeat target: %w", peer, err)
+		conn.recordHeartbeat(peer, err)
+		return err
 	}
 	if !conn.mu.TryLock() {
 		return nil
 	}
 	defer conn.mu.Unlock()
 	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, remote.Addr, remote.RKey, transportWorkID(3, peer)); err != nil {
-		conn.heartbeatErrors.Add(1)
+		conn.recordHeartbeat(peer, err)
 		return err
 	}
 
@@ -553,10 +558,10 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 		defer cancel()
 	}
 	if err := t.poll(pollCtx, conn, 1); err != nil {
-		conn.heartbeatErrors.Add(1)
+		conn.recordHeartbeat(peer, err)
 		return err
 	}
-	conn.heartbeatWrites.Add(1)
+	conn.recordHeartbeat(peer, nil)
 	return nil
 }
 
@@ -653,6 +658,19 @@ func (c *daemonConn) close() error {
 		}
 	}
 	return first
+}
+
+func (c *daemonConn) recordHeartbeat(peer int, err error) {
+	if c == nil {
+		return
+	}
+	if err != nil {
+		n := c.heartbeatErrors.Add(1)
+		log.Printf("jaccld heartbeat peer=%d ok=false errors=%d err=%v", peer, n, err)
+		return
+	}
+	n := c.heartbeatWrites.Add(1)
+	log.Printf("jaccld heartbeat peer=%d ok=true writes=%d", peer, n)
 }
 
 func transportWorkID(kind, peer int) uint64 {
