@@ -310,6 +310,36 @@ func TestDaemonTransportMaintainRunsPostBarrierAfterFailure(t *testing.T) {
 	}
 }
 
+func TestDaemonTransportMaintainPoisonsPostBarrierFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	t0, t1 := newMaintenanceTransportPair(t, ctx)
+	configureMaintenanceTransport(t, t0, 1)
+
+	peerDone := make(chan error, 1)
+	go func() {
+		if err := t1.side.Barrier(ctx); err != nil {
+			peerDone <- err
+			return
+		}
+		peerDone <- t1.side.Close()
+	}()
+
+	err := t0.Maintain(ctx)
+	if err == nil || !strings.Contains(err.Error(), "daemon maintenance post-barrier") {
+		t.Fatalf("Maintain = %v, want post-barrier failure", err)
+	}
+	if err := <-peerDone; err != nil {
+		t.Fatalf("peer pre-barrier = %v", err)
+	}
+	if err := t0.conns[1].checkReady(1); err == nil || !strings.Contains(err.Error(), "daemon maintenance post-barrier") {
+		t.Fatalf("checkReady after post-barrier failure = %v, want poison", err)
+	}
+	if t0.conns[1].maintenanceErrs.Load() != 1 {
+		t.Fatalf("maintenance errors = %d, want 1", t0.conns[1].maintenanceErrs.Load())
+	}
+}
+
 func TestDaemonTransportMaintainPoisonsAllPeersOnPartialPost(t *testing.T) {
 	slab := newTransportTestSlab(t)
 	lease, err := slab.Alloc(maintenanceBytes(3))

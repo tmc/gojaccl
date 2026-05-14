@@ -789,10 +789,13 @@ func (t *daemonTransport) Maintain(ctx context.Context) error {
 	}
 	runErr := t.runMaintenanceLocked(ctx)
 	postErr := t.side.Barrier(ctx)
-	if runErr != nil || postErr != nil {
-		if postErr != nil {
-			postErr = fmt.Errorf("daemon maintenance post-barrier: %w", postErr)
+	if postErr != nil {
+		postErr = fmt.Errorf("daemon maintenance post-barrier: %w", postErr)
+		if runErr == nil {
+			t.poisonMaintenance(postErr)
 		}
+	}
+	if runErr != nil || postErr != nil {
 		return errors.Join(runErr, postErr)
 	}
 	return nil
