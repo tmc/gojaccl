@@ -153,6 +153,9 @@ lease expiry. It does not decide tensor parallelism policy.
 
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
+- `cmd/jaccld/admission.go`: provider-free admission gate used to stop new
+  daemon data operations and wait for in-flight work before a future
+  maintenance window.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
   transport over the registered slab, completion demux, heartbeat MR lease
   exchange, and the gated experimental RDMA-write heartbeat hook.

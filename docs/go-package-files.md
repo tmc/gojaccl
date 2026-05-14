@@ -203,6 +203,11 @@ Package name: `main`.
 
 Files:
 
+- `admission.go`: provider-free admission gate that blocks new daemon data
+  operations and waits for in-flight operations to drain before a future
+  maintenance window.
+- `admission_test.go`: hardware-free tests for maintenance admission blocking,
+  context cancellation, reopening after cancellation, and collective gating.
 - `main.go`: command flags, signal handling, shared slab creation, bounded
   resource session store creation, provider-free control-plane liveness loop,
   singleton RDMA device/protection-domain/MR startup, daemon rank validation,

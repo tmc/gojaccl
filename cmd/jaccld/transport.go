@@ -42,6 +42,7 @@ type daemonTransport struct {
 	slab             *allocator.Slab
 	mr               *rdma.MemoryRegion
 	side             *tcpchan.Channel
+	admission        *admissionGate
 	tracker          *keepalive.Tracker
 	heartbeatLease   daemonHeartbeatLease
 	heartbeatTimeout time.Duration
@@ -94,6 +95,7 @@ func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel,
 		slab:             slab,
 		mr:               hw.mr,
 		tracker:          tracker,
+		admission:        newAdmissionGate(),
 		heartbeatLease:   hb,
 		heartbeatTimeout: cfg.heartbeatTimeout,
 		heartbeatTTL:     ttl,
@@ -298,6 +300,11 @@ func (t *daemonTransport) Send(ctx context.Context, peer int, offset, length int
 	if n == 0 {
 		return nil
 	}
+	done, err := t.enterDataOp(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	conn, err := t.conn(peer)
 	if err != nil {
 		return err
@@ -332,6 +339,11 @@ func (t *daemonTransport) Recv(ctx context.Context, peer int, offset, length int
 	if n == 0 {
 		return nil
 	}
+	done, err := t.enterDataOp(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	conn, err := t.conn(peer)
 	if err != nil {
 		return err
@@ -359,10 +371,20 @@ func (t *daemonTransport) Recv(ctx context.Context, peer int, offset, length int
 }
 
 func (t *daemonTransport) AllReduce(ctx context.Context, op, dt int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	done, err := t.enterDataOp(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	return t.runMeshReduce(ctx, op, reduce.DType(dt), dstOffset, dstLength, srcOffset, srcLength, t.exchange)
 }
 
 func (t *daemonTransport) AllGather(ctx context.Context, elemSize int, dstOffset, dstLength, srcOffset, srcLength int64) error {
+	done, err := t.enterDataOp(ctx)
+	if err != nil {
+		return err
+	}
+	defer done()
 	return t.runMeshGather(ctx, elemSize, dstOffset, dstLength, srcOffset, srcLength, t.exchange)
 }
 
@@ -690,6 +712,20 @@ func (t *daemonTransport) touch(peer int) {
 	if t != nil && t.tracker != nil {
 		t.tracker.Touch(t.routeID(peer))
 	}
+}
+
+func (t *daemonTransport) enterDataOp(ctx context.Context) (func(), error) {
+	if t == nil || t.admission == nil {
+		return func() {}, nil
+	}
+	return t.admission.enter(ctx)
+}
+
+func (t *daemonTransport) beginMaintenance(ctx context.Context) (func(), error) {
+	if t == nil || t.admission == nil {
+		return func() {}, nil
+	}
+	return t.admission.beginMaintenance(ctx)
 }
 
 func (t *daemonTransport) pollExpected(ctx context.Context, conn *daemonConn, ids ...uint64) error {
