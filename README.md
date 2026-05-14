@@ -70,9 +70,9 @@ smoke tests.
 Daemon-backed RDMA heartbeats are disabled by default. The current production
 path proves daemon-owned resource and data-path ownership, but not long-lived
 idle-QP keepalive safety. The experimental RDMA-write heartbeat path requires
-`-experimental-rdma-heartbeat`, a positive `-heartbeat-timeout`, and nonzero
-remote heartbeat address, rkey, length, and epoch metadata; it fails closed
-when that metadata is missing.
+`-experimental-rdma-heartbeat`, a positive `-heartbeat-timeout`, a positive
+`-heartbeat-lease-ttl`, and nonzero remote heartbeat address, rkey, length, and
+epoch metadata; it fails closed when that metadata is missing.
 
 ## Dependency
 

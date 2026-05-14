@@ -78,10 +78,12 @@ route activity so a future heartbeat policy has a clear idle signal.
 
 The experimental RDMA-write heartbeat path is opt-in only with
 `-experimental-rdma-heartbeat`. It requires nonzero remote heartbeat address and
-rkey metadata and a positive `-heartbeat-timeout`; otherwise startup fails
-closed. This path is a staging hook for a future session contract that leases a
-dedicated remote heartbeat MR window. It is not evidence that long-lived idle QP
-keepalive safety is solved.
+rkey metadata, a positive `-heartbeat-timeout`, and a positive
+`-heartbeat-lease-ttl`; otherwise startup fails closed. Daemon peers exchange
+the real `HeartbeatMR{Addr,RKey,Length,Epoch}` for a byte reserved from the
+already-registered slab. This is the lease contract for RDMA-write heartbeat
+arming. It is not, by itself, evidence that long-lived idle QP keepalive safety
+is solved.
 
 A production keepalive uses control-plane liveness as the default safety
 signal. The resource store records live-session activity and health without
@@ -141,8 +143,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jaccld/transport.go`: daemon-owned RDMA point-to-point and collective
-  transport over the registered slab, plus the gated experimental RDMA-write
-  heartbeat hook.
+  transport over the registered slab, plus heartbeat MR lease exchange and the
+  gated experimental RDMA-write heartbeat hook.
 - `internal/allocator/slab.go`: shared-memory slab allocator and logical leases.
 - `internal/ipc/server.go`: UDS control server and `SCM_RIGHTS` descriptor
   passing.

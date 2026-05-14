@@ -32,6 +32,7 @@ func main() {
 	flag.IntVar(&cfg.maxSessions, "max-sessions", 128, "maximum local resource sessions")
 	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "experimental RDMA heartbeat interval")
 	flag.DurationVar(&cfg.heartbeatTimeout, "heartbeat-timeout", time.Second, "maximum experimental RDMA heartbeat completion wait")
+	flag.DurationVar(&cfg.heartbeatLeaseTTL, "heartbeat-lease-ttl", defaultHeartbeatLeaseTTL, "lifetime of exchanged heartbeat memory leases")
 	flag.BoolVar(&cfg.experimentalRDMAHeartbeat, "experimental-rdma-heartbeat", false, "post experimental RDMA-write heartbeats")
 	flag.BoolVar(&cfg.noRDMA, "no-rdma", false, "start IPC without opening RDMA hardware")
 	flag.Parse()
@@ -53,9 +54,12 @@ type config struct {
 	maxSessions               int
 	heartbeat                 time.Duration
 	heartbeatTimeout          time.Duration
+	heartbeatLeaseTTL         time.Duration
 	experimentalRDMAHeartbeat bool
 	noRDMA                    bool
 }
+
+const defaultHeartbeatLeaseTTL = 24 * time.Hour
 
 func run(ctx context.Context, cfg config) error {
 	if !cfg.noRDMA {
@@ -111,7 +115,7 @@ func run(ctx context.Context, cfg config) error {
 	var transport ipc.Transport
 	var rdmaTransport *daemonTransport
 	if hw != nil {
-		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat.Offset, cfg.heartbeatTimeout)
+		rdmaTransport, err = openDaemonTransport(ctx, cfg, side, slab, hw, tracker, heartbeat)
 		if err != nil {
 			return err
 		}
@@ -178,6 +182,9 @@ func (cfg config) validateRDMA() error {
 	}
 	if cfg.experimentalRDMAHeartbeat && cfg.heartbeatTimeout <= 0 {
 		return fmt.Errorf("heartbeat timeout %s must be positive", cfg.heartbeatTimeout)
+	}
+	if cfg.experimentalRDMAHeartbeat && cfg.heartbeatLeaseTTL <= 0 {
+		return fmt.Errorf("heartbeat lease ttl %s must be positive", cfg.heartbeatLeaseTTL)
 	}
 	return nil
 }

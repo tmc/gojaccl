@@ -257,6 +257,7 @@ Daemon-backed RDMA heartbeats are disabled by default. The current daemon path
 proves daemon-owned resource and data-path ownership, not long-lived idle-QP
 keepalive safety. The experimental RDMA-write heartbeat hook is opt-in and must
 fail closed unless the peer publishes a real nonzero heartbeat address, rkey,
-length, and epoch. Control-plane liveness is the default safety signal until a
-real heartbeat MR lease exists. Do not replace this with SEND-based heartbeats;
-a SEND heartbeat can consume a user receive on the raw data queue pair.
+length, and epoch from a live heartbeat lease. Control-plane liveness is the
+default safety signal until a real heartbeat MR lease exists. Do not replace
+this with SEND-based heartbeats; a SEND heartbeat can consume a user receive on
+the raw data queue pair.

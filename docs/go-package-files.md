@@ -205,12 +205,12 @@ Files:
 
 - `main.go`: command flags, signal handling, shared slab creation, bounded
   resource session store creation, singleton RDMA device/protection-domain/MR
-  startup, daemon rank validation, transport injection, and IPC listener
-  startup.
+  startup, daemon rank validation, heartbeat lease TTL validation, transport
+  injection, and IPC listener startup.
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives,
-  gated experimental RDMA-write heartbeat setup, barrier, and transport close
-  behavior.
+  heartbeat MR lease exchange, gated experimental RDMA-write heartbeat setup,
+  barrier, and transport close behavior.
 - `main_test.go`: hardware-free command validation and `-no-rdma` IPC smoke
   tests.
 - `transport_test.go`: hardware-free daemon collective offset and reduction
@@ -224,7 +224,7 @@ clients.
 Do not replace RDMA-write heartbeats with SEND-based heartbeats. SEND consumes
 peer receives and is not safe on the raw data queue pair. Do not enable
 RDMA-write heartbeats without a real nonzero remote heartbeat address, rkey,
-length, and epoch.
+length, epoch, and live lease TTL.
 
 ## Design Notes
 

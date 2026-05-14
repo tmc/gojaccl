@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/tmc/gojaccl/internal/allocator"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/keepalive"
 	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/reduce"
@@ -32,29 +34,35 @@ type daemonTransport struct {
 	mr               *rdma.MemoryRegion
 	side             *tcpchan.Channel
 	tracker          *keepalive.Tracker
-	heartbeatOffset  int64
+	heartbeatLease   daemonHeartbeatLease
 	heartbeatTimeout time.Duration
+	heartbeatTTL     time.Duration
 	conns            []*daemonConn
 }
 
 type daemonConn struct {
-	cq                  *rdma.CompletionQueue
-	qp                  *rdma.QueuePair
-	remoteHeartbeatAddr uint64
-	remoteRKey          uint32
-	mu                  sync.Mutex
+	cq              *rdma.CompletionQueue
+	qp              *rdma.QueuePair
+	remoteHeartbeat daemonHeartbeatLease
+	heartbeatWrites atomic.Uint64
+	heartbeatErrors atomic.Uint64
+	mu              sync.Mutex
+}
+
+type daemonHeartbeatLease struct {
+	MR        resource.HeartbeatMR
+	ExpiresAt time.Time
 }
 
 type daemonDestination struct {
-	QP              rdma.Destination `json:"qp"`
-	MRAddr          uint64           `json:"mr_addr"`
-	RKey            uint32           `json:"rkey"`
-	HeartbeatOffset int64            `json:"heartbeat_offset"`
+	QP           rdma.Destination     `json:"qp"`
+	HeartbeatMR  resource.HeartbeatMR `json:"heartbeat_mr,omitempty"`
+	HeartbeatTTL time.Duration        `json:"heartbeat_ttl,omitempty"`
 }
 
 type daemonExchangeFunc func(context.Context, int64, int64, int64) error
 
-func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel, slab *allocator.Slab, hw *hardware, tracker *keepalive.Tracker, heartbeatOffset int64, heartbeatTimeout time.Duration) (*daemonTransport, error) {
+func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel, slab *allocator.Slab, hw *hardware, tracker *keepalive.Tracker, heartbeat allocator.Lease) (*daemonTransport, error) {
 	if hw == nil || hw.dev == nil || hw.pd == nil || hw.mr == nil {
 		return nil, fmt.Errorf("open daemon transport: nil hardware")
 	}
@@ -64,14 +72,30 @@ func openDaemonTransport(ctx context.Context, cfg config, side *tcpchan.Channel,
 	if side == nil {
 		return nil, fmt.Errorf("open daemon transport: nil side channel")
 	}
+	ttl := cfg.heartbeatLeaseTTL
+	if ttl == 0 {
+		ttl = defaultHeartbeatLeaseTTL
+	}
+	if ttl <= 0 {
+		return nil, fmt.Errorf("open daemon transport: heartbeat lease ttl %s must be positive", ttl)
+	}
+	epoch := uint64(time.Now().UnixNano())
+	if epoch == 0 {
+		epoch = heartbeat.ID
+	}
+	hb, err := heartbeatMR(hw.mr.Addr(), hw.mr.RKey(), heartbeat, epoch)
+	if err != nil {
+		return nil, fmt.Errorf("open daemon transport: heartbeat lease: %w", err)
+	}
 	t := &daemonTransport{
 		rank:             cfg.rank,
 		size:             cfg.size,
 		slab:             slab,
 		mr:               hw.mr,
 		tracker:          tracker,
-		heartbeatOffset:  heartbeatOffset,
-		heartbeatTimeout: heartbeatTimeout,
+		heartbeatLease:   daemonHeartbeatLease{MR: hb, ExpiresAt: time.Now().Add(ttl)},
+		heartbeatTimeout: cfg.heartbeatTimeout,
+		heartbeatTTL:     ttl,
 		conns:            make([]*daemonConn, cfg.size),
 	}
 	if err := t.open(ctx, cfg, hw, side); err != nil {
@@ -95,10 +119,9 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 		}
 		t.conns[peer] = conn
 		local[peer] = daemonDestination{
-			QP:              dst,
-			MRAddr:          hw.mr.Addr(),
-			RKey:            hw.mr.RKey(),
-			HeartbeatOffset: t.heartbeatOffset,
+			QP:           dst,
+			HeartbeatMR:  t.heartbeatLease.MR,
+			HeartbeatTTL: t.heartbeatTTL,
 		}
 	}
 
@@ -132,12 +155,11 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		if t.tracker != nil {
-			addr, err := heartbeatAddress(remote)
+			lease, err := validateRemoteHeartbeatDestination(remote, time.Now(), conn.remoteHeartbeat.MR.Epoch)
 			if err != nil {
 				return fmt.Errorf("peer %d heartbeat: %w", peer, err)
 			}
-			conn.remoteHeartbeatAddr = addr
-			conn.remoteRKey = remote.RKey
+			conn.remoteHeartbeat = lease
 			peer := peer
 			if err := t.tracker.Add(t.routeID(peer), keepalive.SenderFunc(func(ctx context.Context) error {
 				return t.heartbeat(ctx, peer)
@@ -152,21 +174,56 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 	return nil
 }
 
-func heartbeatAddress(dst daemonDestination) (uint64, error) {
-	if dst.MRAddr == 0 {
-		return 0, fmt.Errorf("missing remote memory address")
+func heartbeatMR(base uint64, rkey uint32, lease allocator.Lease, epoch uint64) (resource.HeartbeatMR, error) {
+	if base == 0 {
+		return resource.HeartbeatMR{}, fmt.Errorf("missing local memory address")
 	}
-	if dst.RKey == 0 {
-		return 0, fmt.Errorf("missing remote memory key")
+	if lease.Offset < 0 {
+		return resource.HeartbeatMR{}, fmt.Errorf("negative heartbeat offset %d", lease.Offset)
 	}
-	if dst.HeartbeatOffset < 0 {
-		return 0, fmt.Errorf("negative remote heartbeat offset %d", dst.HeartbeatOffset)
+	addr := base + uint64(lease.Offset)
+	if addr < base {
+		return resource.HeartbeatMR{}, fmt.Errorf("heartbeat address overflow")
 	}
-	addr := dst.MRAddr + uint64(dst.HeartbeatOffset)
-	if addr < dst.MRAddr {
-		return 0, fmt.Errorf("remote heartbeat address overflow")
+	hb := resource.HeartbeatMR{
+		Addr:   addr,
+		RKey:   rkey,
+		Length: lease.Length,
+		Epoch:  epoch,
 	}
-	return addr, nil
+	if err := hb.ValidateForRDMA(); err != nil {
+		return resource.HeartbeatMR{}, err
+	}
+	return hb, nil
+}
+
+func validateRemoteHeartbeatDestination(dst daemonDestination, now time.Time, lastEpoch uint64) (daemonHeartbeatLease, error) {
+	if err := dst.HeartbeatMR.ValidateForRDMA(); err != nil {
+		return daemonHeartbeatLease{}, err
+	}
+	if dst.HeartbeatTTL <= 0 {
+		return daemonHeartbeatLease{}, fmt.Errorf("%w: heartbeat ttl %s must be positive", resource.ErrInvalidRequest, dst.HeartbeatTTL)
+	}
+	if lastEpoch != 0 && dst.HeartbeatMR.Epoch <= lastEpoch {
+		return daemonHeartbeatLease{}, fmt.Errorf("%w: stale heartbeat epoch %d after %d", resource.ErrInvalidRequest, dst.HeartbeatMR.Epoch, lastEpoch)
+	}
+	return daemonHeartbeatLease{
+		MR:        dst.HeartbeatMR,
+		ExpiresAt: now.Add(dst.HeartbeatTTL),
+	}, nil
+}
+
+func (l daemonHeartbeatLease) RDMA(now time.Time) (resource.HeartbeatMR, error) {
+	if err := l.MR.ValidateForRDMA(); err != nil {
+		return resource.HeartbeatMR{}, err
+	}
+	if l.ExpiresAt.IsZero() {
+		return resource.HeartbeatMR{}, fmt.Errorf("%w: heartbeat lease deadline is zero", resource.ErrInvalidRequest)
+	}
+	if !l.ExpiresAt.After(now) {
+		return resource.HeartbeatMR{}, resource.ErrExpired
+	}
+	return l.MR, nil
 }
 
 func openDaemonConn(hw *hardware) (*daemonConn, rdma.Destination, error) {
@@ -464,7 +521,11 @@ func (t *daemonTransport) bytes() []byte {
 }
 
 func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
-	start, _, err := t.rangeInMR(t.heartbeatOffset, 1)
+	offset, err := t.localHeartbeatOffset()
+	if err != nil {
+		return err
+	}
+	start, _, err := t.rangeInMR(offset, 1)
 	if err != nil {
 		return err
 	}
@@ -472,17 +533,16 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 	if err != nil {
 		return err
 	}
-	if conn.remoteHeartbeatAddr == 0 {
-		return fmt.Errorf("rank %d has no heartbeat target", peer)
-	}
-	if conn.remoteRKey == 0 {
-		return fmt.Errorf("rank %d has no heartbeat memory key", peer)
+	remote, err := conn.remoteHeartbeat.RDMA(time.Now())
+	if err != nil {
+		return fmt.Errorf("rank %d heartbeat target: %w", peer, err)
 	}
 	if !conn.mu.TryLock() {
 		return nil
 	}
 	defer conn.mu.Unlock()
-	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, conn.remoteHeartbeatAddr, conn.remoteRKey, transportWorkID(3, peer)); err != nil {
+	if err := rdma.PostWrite(conn.qp, t.mr, start, 1, remote.Addr, remote.RKey, transportWorkID(3, peer)); err != nil {
+		conn.heartbeatErrors.Add(1)
 		return err
 	}
 
@@ -492,7 +552,34 @@ func (t *daemonTransport) heartbeat(ctx context.Context, peer int) error {
 		pollCtx, cancel = context.WithTimeout(ctx, t.heartbeatTimeout)
 		defer cancel()
 	}
-	return t.poll(pollCtx, conn, 1)
+	if err := t.poll(pollCtx, conn, 1); err != nil {
+		conn.heartbeatErrors.Add(1)
+		return err
+	}
+	conn.heartbeatWrites.Add(1)
+	return nil
+}
+
+func (t *daemonTransport) localHeartbeatOffset() (int64, error) {
+	if t == nil || t.mr == nil {
+		return 0, fmt.Errorf("heartbeat source: nil memory region")
+	}
+	local := t.heartbeatLease.MR
+	if err := local.ValidateForRDMA(); err != nil {
+		return 0, err
+	}
+	base := t.mr.Addr()
+	if base == 0 {
+		return 0, fmt.Errorf("heartbeat source: missing memory address")
+	}
+	if local.Addr < base {
+		return 0, fmt.Errorf("heartbeat source address %d before base %d", local.Addr, base)
+	}
+	off := local.Addr - base
+	if off > uint64(maxInt64) {
+		return 0, fmt.Errorf("heartbeat source offset overflows")
+	}
+	return int64(off), nil
 }
 
 func (t *daemonTransport) conn(peer int) (*daemonConn, error) {

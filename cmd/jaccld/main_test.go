@@ -53,6 +53,11 @@ func TestConfigValidateRDMA(t *testing.T) {
 			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second, experimentalRDMAHeartbeat: true},
 			want: "heartbeat timeout 0s must be positive",
 		},
+		{
+			name: "experimental zero heartbeat lease ttl",
+			cfg:  config{rank: 0, size: 2, coordinator: "127.0.0.1:12345", heartbeat: time.Second, heartbeatTimeout: time.Second, experimentalRDMAHeartbeat: true},
+			want: "heartbeat lease ttl 0s must be positive",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

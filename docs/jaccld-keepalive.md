@@ -39,6 +39,12 @@ The resource package records this contract with `SessionRequest.HeartbeatMR`,
 register memory, allocate protection domains, create queue pairs, or post
 work requests.
 
+Daemon peers also exchange heartbeat leases during startup. Each daemon
+reserves a byte from the already-registered slab, publishes the real remote
+address and rkey for that byte, and attaches a lease epoch and TTL. The
+receiver rejects missing metadata, stale epochs, and expired leases before
+arming an RDMA heartbeat.
+
 ## Deferred Work
 
 Actual RDMA-write keepalive execution remains a later two-host gated slice. It

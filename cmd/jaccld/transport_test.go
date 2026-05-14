@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
+	"time"
 	"unsafe"
 
 	"github.com/tmc/gojaccl/internal/allocator"
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/reduce"
 )
 
@@ -88,16 +91,80 @@ func TestDaemonTransportCollectiveValidation(t *testing.T) {
 	}
 }
 
-func TestHeartbeatAddressRequiresRKey(t *testing.T) {
-	if _, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 0, HeartbeatOffset: 7}); err == nil {
-		t.Fatal("heartbeatAddress with zero rkey = nil")
-	}
-	addr, err := heartbeatAddress(daemonDestination{MRAddr: 100, RKey: 9, HeartbeatOffset: 7})
+func TestHeartbeatMRFromLease(t *testing.T) {
+	mr, err := heartbeatMR(100, 9, allocator.Lease{ID: 7, Offset: 5, Length: 1}, 11)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if addr != 107 {
-		t.Fatalf("heartbeat address = %d, want 107", addr)
+	want := resource.HeartbeatMR{Addr: 105, RKey: 9, Length: 1, Epoch: 11}
+	if mr != want {
+		t.Fatalf("heartbeatMR = %+v, want %+v", mr, want)
+	}
+
+	tests := []struct {
+		name  string
+		base  uint64
+		rkey  uint32
+		lease allocator.Lease
+		epoch uint64
+	}{
+		{name: "ZeroBase", rkey: 1, lease: allocator.Lease{ID: 1, Length: 1}, epoch: 1},
+		{name: "ZeroRKey", base: 1, lease: allocator.Lease{ID: 1, Length: 1}, epoch: 1},
+		{name: "ZeroLength", base: 1, rkey: 1, lease: allocator.Lease{ID: 1}, epoch: 1},
+		{name: "ZeroEpoch", base: 1, rkey: 1, lease: allocator.Lease{ID: 1, Length: 1}},
+		{name: "NegativeOffset", base: 1, rkey: 1, lease: allocator.Lease{ID: 1, Offset: -1, Length: 1}, epoch: 1},
+		{name: "Overflow", base: ^uint64(0), rkey: 1, lease: allocator.Lease{ID: 1, Offset: 1, Length: 1}, epoch: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := heartbeatMR(tt.base, tt.rkey, tt.lease, tt.epoch); err == nil {
+				t.Fatal("heartbeatMR = nil, want error")
+			}
+		})
+	}
+}
+
+func TestValidateRemoteHeartbeatDestination(t *testing.T) {
+	now := time.Unix(100, 0)
+	dst := daemonDestination{
+		HeartbeatMR:  resource.HeartbeatMR{Addr: 100, RKey: 9, Length: 1, Epoch: 11},
+		HeartbeatTTL: time.Minute,
+	}
+	lease, err := validateRemoteHeartbeatDestination(dst, now, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.MR != dst.HeartbeatMR {
+		t.Fatalf("heartbeat lease mr = %+v, want %+v", lease.MR, dst.HeartbeatMR)
+	}
+	if !lease.ExpiresAt.Equal(now.Add(time.Minute)) {
+		t.Fatalf("heartbeat expiry = %s, want %s", lease.ExpiresAt, now.Add(time.Minute))
+	}
+	if _, err := validateRemoteHeartbeatDestination(dst, now, 11); !errors.Is(err, resource.ErrInvalidRequest) {
+		t.Fatalf("stale epoch = %v, want ErrInvalidRequest", err)
+	}
+	dst.HeartbeatTTL = 0
+	if _, err := validateRemoteHeartbeatDestination(dst, now, 0); !errors.Is(err, resource.ErrInvalidRequest) {
+		t.Fatalf("zero ttl = %v, want ErrInvalidRequest", err)
+	}
+	dst.HeartbeatTTL = time.Minute
+	dst.HeartbeatMR.RKey = 0
+	if _, err := validateRemoteHeartbeatDestination(dst, now, 0); !errors.Is(err, resource.ErrInvalidRequest) {
+		t.Fatalf("zero rkey = %v, want ErrInvalidRequest", err)
+	}
+}
+
+func TestDaemonHeartbeatLeaseRDMAExpires(t *testing.T) {
+	now := time.Unix(100, 0)
+	lease := daemonHeartbeatLease{
+		MR:        resource.HeartbeatMR{Addr: 100, RKey: 9, Length: 1, Epoch: 11},
+		ExpiresAt: now.Add(time.Minute),
+	}
+	if _, err := lease.RDMA(now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lease.RDMA(now.Add(time.Minute)); !errors.Is(err, resource.ErrExpired) {
+		t.Fatalf("expired RDMA = %v, want ErrExpired", err)
 	}
 }
 

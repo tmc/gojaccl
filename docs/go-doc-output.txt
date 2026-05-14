@@ -114,7 +114,7 @@ and daemon-supported collectives over leased slab offsets.
 
 Daemon-backed RDMA heartbeats are disabled by default. The experimental
 RDMA-write heartbeat hook requires explicit opt-in and nonzero remote heartbeat
-address and rkey metadata.
+address, rkey, length, epoch, and live lease metadata.
 
 == gojaccl/internal/allocator ==
 
