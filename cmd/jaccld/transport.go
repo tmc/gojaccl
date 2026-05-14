@@ -154,6 +154,14 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 				return fmt.Errorf("peer %d heartbeat: %w", peer, err)
 			}
 			conn.remoteHeartbeat = lease
+			log.Printf("jaccld heartbeat peer=%d lease ok=true addr_nonzero=%t rkey_nonzero=%t length=%d epoch=%d expires=%s",
+				peer,
+				lease.MR.Addr != 0,
+				lease.MR.RKey != 0,
+				lease.MR.Length,
+				lease.MR.Epoch,
+				lease.ExpiresAt.UTC().Format(time.RFC3339Nano),
+			)
 			peer := peer
 			if err := t.tracker.Add(t.routeID(peer), keepalive.SenderFunc(func(ctx context.Context) error {
 				return t.heartbeat(ctx, peer)
