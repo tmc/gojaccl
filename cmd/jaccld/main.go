@@ -30,6 +30,7 @@ func main() {
 	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
 	flag.IntVar(&cfg.maxSessions, "max-sessions", 128, "maximum local resource sessions")
+	flag.DurationVar(&cfg.controlPlaneLiveness, "control-plane-liveness", time.Minute, "provider-free session liveness pulse interval; zero disables")
 	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "experimental RDMA heartbeat interval")
 	flag.DurationVar(&cfg.heartbeatTimeout, "heartbeat-timeout", time.Second, "maximum experimental RDMA heartbeat completion wait")
 	flag.DurationVar(&cfg.heartbeatLeaseTTL, "heartbeat-lease-ttl", defaultHeartbeatLeaseTTL, "lifetime of exchanged heartbeat memory leases")
@@ -55,6 +56,7 @@ type config struct {
 	heartbeat                 time.Duration
 	heartbeatTimeout          time.Duration
 	heartbeatLeaseTTL         time.Duration
+	controlPlaneLiveness      time.Duration
 	experimentalRDMAHeartbeat bool
 	noRDMA                    bool
 }
@@ -62,6 +64,9 @@ type config struct {
 const defaultHeartbeatLeaseTTL = 24 * time.Hour
 
 func run(ctx context.Context, cfg config) error {
+	if cfg.controlPlaneLiveness < 0 {
+		return fmt.Errorf("control-plane liveness interval %s must be non-negative", cfg.controlPlaneLiveness)
+	}
 	if !cfg.noRDMA {
 		if err := cfg.validateRDMA(); err != nil {
 			return err
@@ -84,6 +89,13 @@ func run(ctx context.Context, cfg config) error {
 	resources, err := newResourceStore(slab, cfg.maxSessions)
 	if err != nil {
 		return err
+	}
+	if cfg.controlPlaneLiveness > 0 {
+		go func() {
+			if err := resources.RunControlPlaneLiveness(ctx, cfg.controlPlaneLiveness); err != nil && !errors.Is(err, context.Canceled) {
+				log.Printf("jaccld control-plane liveness stopped: %v", err)
+			}
+		}()
 	}
 
 	var heartbeat allocator.Lease

@@ -204,9 +204,10 @@ Package name: `main`.
 Files:
 
 - `main.go`: command flags, signal handling, shared slab creation, bounded
-  resource session store creation, singleton RDMA device/protection-domain/MR
-  startup, daemon rank validation, heartbeat lease TTL validation, transport
-  injection, and IPC listener startup.
+  resource session store creation, provider-free control-plane liveness loop,
+  singleton RDMA device/protection-domain/MR startup, daemon rank validation,
+  heartbeat lease TTL validation, transport injection, and IPC listener
+  startup.
 - `transport.go`: daemon-owned RDMA transport, side-channel destination
   exchange, queue-pair setup, slab-offset send, recv, collectives, completion
   demux, heartbeat MR lease exchange, gated experimental RDMA-write heartbeat

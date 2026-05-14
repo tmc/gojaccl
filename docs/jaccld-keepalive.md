@@ -16,6 +16,8 @@ the admission contract, not a health timestamp.
 `Store.PulseControlPlane` and `Store.RunControlPlaneLiveness` are provider-free
 helpers. They do not import the RDMA provider, inspect queue pairs, poll
 completion queues, or post work requests. They only update live lease metadata.
+`jaccld` runs this loop with `-control-plane-liveness`; the default command
+interval is one minute, and zero disables the loop.
 
 ## RDMA-Write Lease
 

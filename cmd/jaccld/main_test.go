@@ -79,6 +79,18 @@ func TestConfigValidateRDMA(t *testing.T) {
 	}
 }
 
+func TestRunRejectsNegativeControlPlaneLiveness(t *testing.T) {
+	err := run(context.Background(), config{
+		slabSize:             4096,
+		maxSessions:          1,
+		controlPlaneLiveness: -time.Second,
+		noRDMA:               true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "control-plane liveness interval -1s must be non-negative") {
+		t.Fatalf("run negative liveness = %v, want validation error", err)
+	}
+}
+
 func TestRunNoRDMAStartsIPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -22,7 +22,8 @@ resource limits:
   transfer is not viable. The daemon must register one large slab and sublease
   byte ranges from it.
 - Queue pairs become unreliable after roughly 23 idle minutes. The daemon must
-  keep every active queue pair warm independently of user traffic.
+  report route health conservatively; no accepted background data-QP heartbeat
+  exists for Apple Thunderbolt RDMA yet.
 
 These constraints rule out a library-only architecture. Short-lived Python,
 MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
@@ -40,7 +41,8 @@ On startup, `jaccld`:
 6. Optionally starts experimental RDMA-write heartbeat management for active
    queue pairs.
 7. Starts a bounded resource session store for local clients.
-8. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
+8. Starts provider-free control-plane liveness pulses unless disabled.
+9. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
 
 The daemon releases RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not

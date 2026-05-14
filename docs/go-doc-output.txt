@@ -108,9 +108,10 @@ Command jaccld owns local Apple RDMA resources for jaccl clients.
 Each daemon rank is started with -rank, -size, and -coordinator unless -no-rdma
 is set. The daemon opens one RDMA device, allocates one protection domain,
 registers one shared slab memory region, creates queue pairs for peer daemon
-ranks, starts a bounded resource session store, and serves local clients
-through a Unix-domain socket. The daemon transport supports barrier, send, recv,
-and daemon-supported collectives over leased slab offsets.
+ranks, starts a bounded resource session store with provider-free control-plane
+liveness pulses, and serves local clients through a Unix-domain socket. The
+daemon transport supports barrier, send, recv, and daemon-supported collectives
+over leased slab offsets.
 
 Daemon-backed RDMA heartbeats are disabled by default. The experimental
 RDMA-write heartbeat hook requires explicit opt-in and nonzero remote heartbeat
