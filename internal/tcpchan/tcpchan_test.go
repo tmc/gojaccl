@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -51,11 +52,35 @@ func TestSideChannelDial(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		if err := writeJSON(ctx, conn, hello{Rank: 1, Size: 3}); err != nil {
+		if err := writeJSON(ctx, conn, newHello(1, 3)); err != nil {
 			t.Fatal(err)
 		}
 		if err := <-errc; err == nil {
 			t.Fatal("rank zero accepted wrong peer count")
+		}
+	})
+	t.Run("MissingProtocolRejected", func(t *testing.T) {
+		addr := unusedAddr(t)
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		errc := make(chan error, 1)
+		go func() {
+			c, err := New(ctx, 0, 2, addr)
+			if c != nil {
+				_ = c.Close()
+			}
+			errc <- err
+		}()
+		conn, err := dialEventually(ctx, addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer conn.Close()
+		if err := writeJSON(ctx, conn, hello{Rank: 1, Size: 2}); err != nil {
+			t.Fatal(err)
+		}
+		if err := <-errc; err == nil || !strings.Contains(err.Error(), "incompatible protocol") {
+			t.Fatalf("rank zero protocol error = %v, want incompatible protocol", err)
 		}
 	})
 	t.Run("DuplicateRankRejected", func(t *testing.T) {
@@ -76,7 +101,7 @@ func TestSideChannelDial(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer conn.Close()
-			if err := writeJSON(ctx, conn, hello{Rank: 1, Size: 3}); err != nil {
+			if err := writeJSON(ctx, conn, newHello(1, 3)); err != nil {
 				t.Fatal(err)
 			}
 			_, _ = readJSON[hello](ctx, conn)

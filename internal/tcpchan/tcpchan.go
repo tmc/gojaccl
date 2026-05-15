@@ -19,9 +19,16 @@ type Channel struct {
 	once     sync.Once
 }
 
+const (
+	helloMagic   = "gojaccl/tcpchan"
+	helloVersion = 1
+)
+
 type hello struct {
-	Rank int
-	Size int
+	Magic   string `json:"magic"`
+	Version int    `json:"version"`
+	Rank    int    `json:"rank"`
+	Size    int    `json:"size"`
 }
 
 // New connects all ranks to the rank-zero coordinator.
@@ -79,6 +86,10 @@ func (c *Channel) listen(ctx context.Context, coordinator string) error {
 			_ = conn.Close()
 			return err
 		}
+		if err := checkHello(msg); err != nil {
+			_ = conn.Close()
+			return err
+		}
 		if msg.Size != c.size {
 			_ = conn.Close()
 			return fmt.Errorf("tcpchan: peer rank %d size %d, want %d", msg.Rank, msg.Size, c.size)
@@ -92,7 +103,7 @@ func (c *Channel) listen(ctx context.Context, coordinator string) error {
 			return fmt.Errorf("tcpchan: duplicate rank %d", msg.Rank)
 		}
 		c.peers[msg.Rank] = conn
-		if err := writeJSON(ctx, conn, hello{Rank: c.rank, Size: c.size}); err != nil {
+		if err := writeJSON(ctx, conn, newHello(c.rank, c.size)); err != nil {
 			return err
 		}
 		accepted++
@@ -112,12 +123,16 @@ func (c *Channel) dial(ctx context.Context, coordinator string) error {
 		}
 		conn, err := d.DialContext(ctx, "tcp", coordinator)
 		if err == nil {
-			if err := writeJSON(ctx, conn, hello{Rank: c.rank, Size: c.size}); err != nil {
+			if err := writeJSON(ctx, conn, newHello(c.rank, c.size)); err != nil {
 				_ = conn.Close()
 				return err
 			}
 			ack, err := readJSON[hello](ctx, conn)
 			if err != nil {
+				_ = conn.Close()
+				return err
+			}
+			if err := checkHello(ack); err != nil {
 				_ = conn.Close()
 				return err
 			}
@@ -137,6 +152,22 @@ func (c *Channel) dial(ctx context.Context, coordinator string) error {
 			return fmt.Errorf("tcpchan: dial %s: %w", coordinator, ctx.Err())
 		}
 	}
+}
+
+func newHello(rank, size int) hello {
+	return hello{
+		Magic:   helloMagic,
+		Version: helloVersion,
+		Rank:    rank,
+		Size:    size,
+	}
+}
+
+func checkHello(msg hello) error {
+	if msg.Magic != helloMagic || msg.Version != helloVersion {
+		return fmt.Errorf("tcpchan: incompatible protocol magic=%q version=%d", msg.Magic, msg.Version)
+	}
+	return nil
 }
 
 // AllGather exchanges one opaque metadata value per rank.
