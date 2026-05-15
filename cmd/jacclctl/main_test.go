@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"net"
+	"os"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tmc/gojaccl/internal/rdma"
 )
 
 func TestTCPDiagnosticLoopback(t *testing.T) {
@@ -69,5 +72,98 @@ func TestRunTCPDiagnosticCommandValidation(t *testing.T) {
 				t.Fatalf("runTCPDiagnosticCommand = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestRunRDMAMetadataCommandValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing device",
+			want: "device is required",
+		},
+		{
+			name: "unexpected argument",
+			args: []string{"-device", "rdma_en3", "extra"},
+			want: "unexpected rdma-metadata arguments",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runRDMAMetadataCommand(context.Background(), tt.args, &out)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runRDMAMetadataCommand = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatRDMAPortInfo(t *testing.T) {
+	info := rdma.PortInfo{
+		Device:           "rdma_en3",
+		PortNum:          1,
+		LID:              0,
+		GIDTableLength:   2,
+		SelectedGIDIndex: 1,
+		GIDs: []rdma.GIDEntry{
+			{
+				Index: 0,
+				Zero:  true,
+			},
+			{
+				Index:      1,
+				GID:        [16]byte{10: 0xff, 11: 0xff, 12: 172, 13: 31, 14: 253, 15: 2},
+				IPv4Mapped: true,
+			},
+		},
+	}
+	var out bytes.Buffer
+	formatRDMAPortInfo(&out, info)
+	got := out.String()
+	for _, want := range []string{
+		"rdma metadata device=rdma_en3 port=1 lid=0 gid_tbl_len=2 selected_gid_index=1",
+		"gid index=0 value=:: ipv4_mapped=false zero=true",
+		"gid index=1 value=::ffff:172.31.253.2 ipv4_mapped=true zero=false ipv4=172.31.253.2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("metadata output missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestRDMAMetadataCommandDoesNotAllocateResources(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func runRDMAMetadataCommand")
+	if start < 0 {
+		t.Fatal("runRDMAMetadataCommand not found")
+	}
+	end := strings.Index(text[start:], "\nfunc formatRDMAPortInfo")
+	if end < 0 {
+		t.Fatal("formatRDMAPortInfo not found")
+	}
+	body := text[start : start+end]
+	for _, forbidden := range []string{
+		"NewProtectionDomain",
+		"NewCompletionQueue",
+		"NewQueuePair",
+		"RegisterMemory",
+		"NewMemoryRegion",
+		"ReadyToReceive",
+		"ReadyToSend",
+		"PostSend",
+		"PostRecv",
+		"PostWrite",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rdma metadata command must not call %s", forbidden)
+		}
 	}
 }

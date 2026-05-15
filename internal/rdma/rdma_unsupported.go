@@ -35,6 +35,10 @@ func LocalDestination(qp *QueuePair) (Destination, error) {
 	return Destination{}, ErrUnavailable
 }
 
+func QueryPort(dev *Device) (PortInfo, error) {
+	return PortInfo{}, ErrUnavailable
+}
+
 func InitQueuePair(qp *QueuePair) error {
 	return ErrUnavailable
 }

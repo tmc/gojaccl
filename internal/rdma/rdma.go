@@ -107,6 +107,24 @@ type Destination struct {
 	GID      [16]byte
 }
 
+// PortInfo is the provider metadata needed before an RTR transition.
+type PortInfo struct {
+	Device           string
+	PortNum          int
+	LID              uint16
+	GIDTableLength   int
+	SelectedGIDIndex int
+	GIDs             []GIDEntry
+}
+
+// GIDEntry is one entry from a provider GID table.
+type GIDEntry struct {
+	Index      int
+	GID        [16]byte
+	IPv4Mapped bool
+	Zero       bool
+}
+
 // WorkRequest describes a completed work request.
 type WorkRequest struct {
 	ID     uint64

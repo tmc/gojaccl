@@ -8,10 +8,12 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/netip"
 	"os"
 	"time"
 
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/tcpchan"
 )
 
@@ -26,6 +28,7 @@ func main() {
 	flag.StringVar(&socket, "socket", ipc.DefaultSocket, "jaccld Unix-domain socket path")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: jacclctl [flags] maintain\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-metadata -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] tcp-diagnostic (-listen addr | -dial addr)\n")
 		flag.PrintDefaults()
 	}
@@ -54,10 +57,68 @@ func main() {
 		if err := runTCPDiagnosticCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatal(err)
 		}
+	case "rdma-metadata":
+		if err := runRDMAMetadataCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("rdma-metadata", flag.ContinueOnError)
+	fs.SetOutput(out)
+	device := fs.String("device", "", "RDMA device name")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected rdma-metadata arguments")
+	}
+	if *device == "" {
+		return fmt.Errorf("device is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	dev, err := rdma.OpenDevice(*device)
+	if err != nil {
+		return err
+	}
+	defer dev.Close()
+	info, err := rdma.QueryPort(dev)
+	if err != nil {
+		return err
+	}
+	formatRDMAPortInfo(out, info)
+	return nil
+}
+
+func formatRDMAPortInfo(out io.Writer, info rdma.PortInfo) {
+	fmt.Fprintf(out, "rdma metadata device=%s port=%d lid=%d gid_tbl_len=%d selected_gid_index=%d\n",
+		info.Device, info.PortNum, info.LID, info.GIDTableLength, info.SelectedGIDIndex)
+	for _, entry := range info.GIDs {
+		fmt.Fprintf(out, "gid index=%d value=%s ipv4_mapped=%t zero=%t",
+			entry.Index, formatGID(entry.GID), entry.IPv4Mapped, entry.Zero)
+		if ip, ok := ipv4MappedGID(entry.GID); ok {
+			fmt.Fprintf(out, " ipv4=%s", ip)
+		}
+		fmt.Fprintln(out)
+	}
+}
+
+func formatGID(gid [16]byte) string {
+	return netip.AddrFrom16(gid).String()
+}
+
+func ipv4MappedGID(gid [16]byte) (netip.Addr, bool) {
+	addr := netip.AddrFrom16(gid)
+	if !addr.Is4In6() {
+		return netip.Addr{}, false
+	}
+	return addr.Unmap(), true
 }
 
 func runTCPDiagnosticCommand(ctx context.Context, args []string, out io.Writer) error {

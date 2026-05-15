@@ -163,7 +163,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jacclctl/main.go`: operator control command for explicit daemon
-  maintenance requests and one-shot direct TCP diagnostics.
+  maintenance requests, provider metadata collection, and one-shot direct TCP
+  diagnostics.
 - `cmd/jaccld/admission.go`: provider-free admission gate used to stop new
   daemon data operations and wait for in-flight work before a future
   maintenance window.

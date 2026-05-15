@@ -28,6 +28,18 @@ ibv_devinfo -d rdma_en1
 The port used by the proof was `rdma_en1` and had to be active before daemon
 startup. If the provider is not active, stop before launching daemon ranks.
 
+For any new hardware path, collect provider port and GID metadata before any
+RTR attempt:
+
+```sh
+jacclctl rdma-metadata -device rdma_en3
+```
+
+This diagnostic opens the named device and queries port/GID metadata only. It
+does not allocate a protection domain, memory region, completion queue, or queue
+pair. Ordinary TCP reachability is not enough to prove the provider can route
+an RDMA QP to RTR.
+
 Confirm both hosts will run the same binary:
 
 ```sh

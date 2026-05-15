@@ -68,6 +68,16 @@ rejected unless `-allow-remote-tcpchan` is set after an explicit `jacclctl
 tcp-diagnostic` proof. Direct non-loopback `tcpchan` is currently proven only
 for the documented two-host `rdma_en1` IP pair.
 
+Before attempting a new hardware path, collect provider metadata without moving
+any queue pair to RTR:
+
+```sh
+jacclctl rdma-metadata -device rdma_en3
+```
+
+This opens the device and queries port/GID metadata only. It does not allocate
+PDs, MRs, CQs, or QPs, and it does not post work requests.
+
 An operator can trigger the explicit maintenance operation through the daemon
 socket:
 
