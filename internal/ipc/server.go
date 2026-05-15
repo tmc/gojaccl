@@ -412,7 +412,18 @@ func checkAsyncRange(req Request, leases map[uint64]allocator.Lease) error {
 	if err := checkRange(Request{LeaseID: req.DstLeaseID, Peer: 0, Offset: req.DstOffset, Length: req.DstLength}, leases); err != nil {
 		return fmt.Errorf("async destination: %w", err)
 	}
+	if req.SrcLeaseID == req.DstLeaseID && rangesOverlap(req.SrcOffset, req.SrcLength, req.DstOffset, req.DstLength) && !sameRange(req.SrcOffset, req.SrcLength, req.DstOffset, req.DstLength) {
+		return fmt.Errorf("async source and destination partially overlap")
+	}
 	return nil
+}
+
+func sameRange(aOff, aLen, bOff, bLen int64) bool {
+	return aOff == bOff && aLen == bLen
+}
+
+func rangesOverlap(aOff, aLen, bOff, bLen int64) bool {
+	return aOff < bOff+bLen && bOff < aOff+aLen
 }
 
 func readControl(conn *net.UnixConn, v any) error {

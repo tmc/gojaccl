@@ -480,6 +480,72 @@ func TestCheckRange(t *testing.T) {
 	}
 }
 
+func TestCheckAsyncRangeOverlap(t *testing.T) {
+	lease := allocator.Lease{ID: 7, Offset: 10, Length: 20}
+	other := allocator.Lease{ID: 8, Offset: 40, Length: 20}
+	leases := map[uint64]allocator.Lease{
+		lease.ID: lease,
+		other.ID: other,
+	}
+	tests := []struct {
+		name    string
+		req     Request
+		wantErr string
+	}{
+		{
+			name: "SeparateLeases",
+			req: Request{
+				SrcLeaseID: lease.ID, SrcOffset: 10, SrcLength: 8,
+				DstLeaseID: other.ID, DstOffset: 40, DstLength: 8,
+			},
+		},
+		{
+			name: "ExactInPlace",
+			req: Request{
+				SrcLeaseID: lease.ID, SrcOffset: 12, SrcLength: 8,
+				DstLeaseID: lease.ID, DstOffset: 12, DstLength: 8,
+			},
+		},
+		{
+			name: "SameLeaseDisjoint",
+			req: Request{
+				SrcLeaseID: lease.ID, SrcOffset: 10, SrcLength: 8,
+				DstLeaseID: lease.ID, DstOffset: 18, DstLength: 8,
+			},
+		},
+		{
+			name: "PartialOverlap",
+			req: Request{
+				SrcLeaseID: lease.ID, SrcOffset: 12, SrcLength: 8,
+				DstLeaseID: lease.ID, DstOffset: 16, DstLength: 8,
+			},
+			wantErr: "partially overlap",
+		},
+		{
+			name: "DestinationCoversSource",
+			req: Request{
+				SrcLeaseID: lease.ID, SrcOffset: 12, SrcLength: 8,
+				DstLeaseID: lease.ID, DstOffset: 10, DstLength: 12,
+			},
+			wantErr: "partially overlap",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkAsyncRange(tt.req, leases)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("checkAsyncRange = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("checkAsyncRange = %v, want %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestDialMissingSocket(t *testing.T) {
 	if _, err := Dial(context.Background(), filepath.Join(t.TempDir(), "missing.sock")); err == nil {
 		t.Fatal("Dial missing socket = nil")
