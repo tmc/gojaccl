@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/tmc/gojaccl/internal/ipc"
 )
 
 func TestConfigFromEnv(t *testing.T) {
@@ -142,7 +144,7 @@ func TestConfigFromEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.DaemonSocket != "/tmp/jaccld.sock" {
+		if cfg.DaemonSocket != ipc.DefaultSocket {
 			t.Fatalf("DaemonSocket = %q, want default", cfg.DaemonSocket)
 		}
 	})

@@ -14,7 +14,7 @@ import (
 var ErrNoTransport = errors.New("jaccld transport unavailable")
 
 // DefaultSocket is the default jaccld Unix-domain socket path.
-const DefaultSocket = "/tmp/jaccld.sock"
+const DefaultSocket = "/tmp/jaccld/jaccld.sock"
 
 const (
 	opAlloc    = "alloc"

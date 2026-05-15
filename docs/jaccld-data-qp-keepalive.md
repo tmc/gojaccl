@@ -51,7 +51,7 @@ The maintenance operation is admitted explicitly through daemon control, for
 example:
 
 ```sh
-jacclctl -socket /tmp/jaccld.sock maintain
+jacclctl maintain
 ```
 
 It must:

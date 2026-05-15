@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -57,14 +58,16 @@ func NewServerWithResources(slab *allocator.Slab, transport Transport, resources
 }
 
 // ListenAndServe listens on path and serves until ctx is canceled.
-// It sets the socket mode to 0600 after binding. Callers that need to avoid
-// the bind-to-chmod window should use a path in an owner-only directory.
+// The socket parent directory must be owner-only before binding.
 func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if path == "" {
 		path = DefaultSocket
+	}
+	if err := prepareSocketPath(path); err != nil {
+		return err
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("listen ipc: remove stale socket: %w", err)
@@ -74,8 +77,6 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 	if err != nil {
 		return fmt.Errorf("listen ipc %s: %w", path, err)
 	}
-	// The final mode is owner-only. A fully atomic owner-only bind requires
-	// placing the socket in an owner-only directory.
 	if err := os.Chmod(path, 0600); err != nil {
 		_ = ln.Close()
 		return fmt.Errorf("listen ipc %s: chmod socket: %w", path, err)
@@ -103,6 +104,27 @@ func (s *Server) ListenAndServe(ctx context.Context, path string) error {
 		}
 		go s.serve(ctx, conn)
 	}
+}
+
+func prepareSocketPath(path string) error {
+	dir := filepath.Dir(path)
+	if dir == "." || dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("listen ipc: create socket directory %s: %w", dir, err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("listen ipc: stat socket directory %s: %w", dir, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("listen ipc: socket directory %s is not a directory", dir)
+	}
+	if mode := info.Mode().Perm(); mode&0077 != 0 {
+		return fmt.Errorf("listen ipc: socket directory %s has mode %#o, want owner-only", dir, mode)
+	}
+	return nil
 }
 
 func (s *Server) serve(ctx context.Context, conn *net.UnixConn) {

@@ -44,7 +44,8 @@ On startup, `jaccld`:
 6. Reserves daemon-owned maintenance bytes from the registered slab.
 7. Starts a bounded resource session store for local clients.
 8. Starts provider-free control-plane liveness pulses unless disabled.
-9. Listens on a Unix-domain socket, by default `/tmp/jaccld.sock`.
+9. Listens on a Unix-domain socket in an owner-only runtime directory. Custom
+   socket paths must also be placed in an owner-only directory.
 
 The daemon releases RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not

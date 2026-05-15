@@ -491,12 +491,44 @@ func TestServerSocketOwnerOnly(t *testing.T) {
 	defer cleanup()
 	defer client.Close()
 
+	dirInfo, err := os.Stat(filepath.Dir(socket))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode := dirInfo.Mode().Perm(); mode&0077 != 0 {
+		t.Fatalf("socket directory mode = %#o, want owner-only", mode)
+	}
 	info, err := os.Stat(socket)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if mode := info.Mode().Perm(); mode != 0600 {
 		t.Fatalf("socket mode = %#o, want 0600", mode)
+	}
+}
+
+func TestServerRejectsSharedSocketDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(dir, 0700)
+	})
+	slab, err := allocator.NewSlab(t.TempDir(), 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slab.Close()
+	server, err := NewServer(slab, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = server.ListenAndServe(ctx, filepath.Join(dir, "jaccld.sock"))
+	if err == nil || !strings.Contains(err.Error(), "want owner-only") {
+		t.Fatalf("ListenAndServe shared directory = %v, want owner-only error", err)
 	}
 }
 
@@ -515,7 +547,7 @@ func startTestServerWithTransport(t *testing.T, size int64, transport Transport)
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join("/tmp", fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	socket := filepath.Join(secureSocketDir(t), fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
@@ -557,7 +589,7 @@ func startTestServerWithResourceStore(t *testing.T, size int64, transport Transp
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join("/tmp", fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	socket := filepath.Join(secureSocketDir(t), fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
@@ -585,6 +617,21 @@ func startTestServerWithResourceStore(t *testing.T, size int64, transport Transp
 		}
 		_ = os.Remove(socket)
 	}
+}
+
+func secureSocketDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "gojaccl-ipc-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
 }
 
 func newTestResourceStore(t *testing.T, slab *allocator.Slab, sessions int) *resource.Store {

@@ -106,7 +106,17 @@ func startDaemonBackendServer(t *testing.T, transport ipc.Transport) (*allocator
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join("/tmp", fmt.Sprintf("jaccld-backend-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	socketDir, err := os.MkdirTemp("/tmp", "gojaccl-backend-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(socketDir)
+	})
+	if err := os.Chmod(socketDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(socketDir, fmt.Sprintf("jaccld-backend-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
