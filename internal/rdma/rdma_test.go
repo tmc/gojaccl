@@ -197,13 +197,33 @@ func TestRTRUsesDynamicSourceGIDIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	src := string(data)
+	body := sourceBetween(t, src, "func ReadyToReceive(", "\nfunc ReadyToSend(")
 	if strings.Contains(src, "SGIDIndex = 1") {
 		t.Fatal("ReadyToReceive hard-codes SGIDIndex")
 	}
-	if !strings.Contains(src, "SGIDIndex = uint8(gidIndex)") {
+	if !strings.Contains(body, "SGIDIndex = uint8(gidIndex)") {
 		t.Fatal("ReadyToReceive does not use the selected local gid index")
 	}
-	if !strings.Contains(src, "localPortGID(qp)") {
-		t.Fatal("ReadyToReceive does not query local port gid metadata")
+	if !strings.Contains(body, "gidIndex := local.GIDIndex") {
+		t.Fatal("ReadyToReceive does not use the local destination gid index")
 	}
+	if !strings.Contains(body, "func ReadyToReceive(qp *QueuePair, local, remote Destination)") {
+		t.Fatal("ReadyToReceive does not take the local destination explicitly")
+	}
+	if strings.Contains(body, "localPortGID") || strings.Contains(body, "queryPortGIDs") {
+		t.Fatal("ReadyToReceive re-queries provider gid metadata")
+	}
+}
+
+func sourceBetween(t *testing.T, src, start, end string) string {
+	t.Helper()
+	i := strings.Index(src, start)
+	if i < 0 {
+		t.Fatalf("source missing %q", start)
+	}
+	j := strings.Index(src[i:], end)
+	if j < 0 {
+		t.Fatalf("source missing %q after %q", end, start)
+	}
+	return src[i : i+j]
 }

@@ -141,7 +141,7 @@ func (b *rdmaBackend) open(ctx context.Context, cfg Config) error {
 			continue
 		}
 		remote := all[peer][b.rank]
-		if err := rdma.ReadyToReceive(conn.qp, remote); err != nil {
+		if err := rdma.ReadyToReceive(conn.qp, local[peer], remote); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		if err := rdma.ReadyToSend(conn.qp, local[peer].PSN); err != nil {

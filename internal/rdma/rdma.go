@@ -99,6 +99,7 @@ func (m *MemoryRegion) Addr() uint64 {
 }
 
 // Destination is the queue-pair metadata exchanged on the TCP side channel.
+// GIDIndex is the local provider GID-table index used for this destination.
 type Destination struct {
 	LID      uint16
 	QPN      uint32

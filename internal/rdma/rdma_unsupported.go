@@ -43,7 +43,7 @@ func InitQueuePair(qp *QueuePair) error {
 	return ErrUnavailable
 }
 
-func ReadyToReceive(qp *QueuePair, dst Destination) error {
+func ReadyToReceive(qp *QueuePair, local, remote Destination) error {
 	return ErrUnavailable
 }
 

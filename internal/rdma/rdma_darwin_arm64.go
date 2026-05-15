@@ -272,31 +272,28 @@ func InitQueuePair(qp *QueuePair) error {
 	return modifyQueuePair(qp, &attr, mask, "INIT")
 }
 
-func ReadyToReceive(qp *QueuePair, dst Destination) error {
+func ReadyToReceive(qp *QueuePair, local, remote Destination) error {
 	if qp == nil || qp.handle == 0 {
 		return fmt.Errorf("change queue pair to RTR: nil queue pair")
 	}
 	attr := applerdma.IbvQPAttr{
 		QPState:   applerdma.IBV_QPS_RTR,
 		PathMTU:   applerdma.IBV_MTU_1024,
-		RQPSN:     dst.PSN,
-		DestQPNum: dst.QPN,
+		RQPSN:     remote.PSN,
+		DestQPNum: remote.QPN,
 		AHAttr: applerdma.IbvAHAttr{
-			DLID:    dst.LID,
+			DLID:    remote.LID,
 			PortNum: 1,
 		},
 	}
-	if dst.GID != ([16]byte{}) {
-		_, _, gidIndex, err := localPortGID(qp)
-		if err != nil {
-			return fmt.Errorf("local gid index: %w", err)
-		}
+	if remote.GID != ([16]byte{}) {
+		gidIndex := local.GIDIndex
 		if gidIndex < 0 || gidIndex > 255 {
 			return fmt.Errorf("local gid index %d out of uint8 range", gidIndex)
 		}
 		attr.AHAttr.IsGlobal = 1
 		attr.AHAttr.GRH.HopLimit = 1
-		attr.AHAttr.GRH.DGID = applerdma.IbvGID(dst.GID)
+		attr.AHAttr.GRH.DGID = applerdma.IbvGID(remote.GID)
 		attr.AHAttr.GRH.SGIDIndex = uint8(gidIndex)
 	}
 	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_AV | applerdma.IBV_QP_PATH_MTU | applerdma.IBV_QP_DEST_QPN | applerdma.IBV_QP_RQ_PSN

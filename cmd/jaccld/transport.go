@@ -171,7 +171,7 @@ func (t *daemonTransport) open(ctx context.Context, cfg config, hw *hardware, si
 		}
 		remote := all[peer][t.rank]
 		log.Printf("jaccld phase=rtr start peer=%d", peer)
-		if err := rdma.ReadyToReceive(conn.qp, remote.QP); err != nil {
+		if err := rdma.ReadyToReceive(conn.qp, local[peer].QP, remote.QP); err != nil {
 			return fmt.Errorf("peer %d: %w", peer, err)
 		}
 		if err := rdma.ReadyToSend(conn.qp, local[peer].QP.PSN); err != nil {
