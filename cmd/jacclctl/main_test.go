@@ -90,6 +90,11 @@ func TestRunRDMAMetadataCommandValidation(t *testing.T) {
 			args: []string{"-device", "rdma_en3", "extra"},
 			want: "unexpected rdma-metadata arguments",
 		},
+		{
+			name: "bad max gids",
+			args: []string{"-device", "rdma_en3", "-max-gids", "0"},
+			want: "max-gids 0 must be positive",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,6 +113,7 @@ func TestFormatRDMAPortInfo(t *testing.T) {
 		PortNum:          1,
 		LID:              0,
 		GIDTableLength:   2,
+		GIDScanLimit:     64,
 		SelectedGIDIndex: 1,
 		GIDs: []rdma.GIDEntry{
 			{
@@ -125,7 +131,7 @@ func TestFormatRDMAPortInfo(t *testing.T) {
 	formatRDMAPortInfo(&out, info)
 	got := out.String()
 	for _, want := range []string{
-		"rdma metadata device=rdma_en3 port=1 lid=0 gid_tbl_len=2 selected_gid_index=1",
+		"rdma metadata device=rdma_en3 port=1 lid=0 gid_tbl_len=2 gid_scan_limit=64 selected_gid_index=1",
 		"gid index=0 value=:: ipv4_mapped=false zero=true",
 		"gid index=1 value=::ffff:172.31.253.2 ipv4_mapped=true zero=false ipv4=172.31.253.2",
 	} {

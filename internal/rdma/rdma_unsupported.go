@@ -35,7 +35,7 @@ func LocalDestination(qp *QueuePair) (Destination, error) {
 	return Destination{}, ErrUnavailable
 }
 
-func QueryPort(dev *Device) (PortInfo, error) {
+func QueryPort(dev *Device, maxGIDs int) (PortInfo, error) {
 	return PortInfo{}, ErrUnavailable
 }
 

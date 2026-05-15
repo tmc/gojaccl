@@ -20,6 +20,7 @@ import (
 const (
 	defaultTCPDiagnosticPayload = "gojaccl tcp diagnostic"
 	tcpDiagnosticAck            = "gojaccl tcp diagnostic ack"
+	defaultRDMAMetadataMaxGIDs  = 64
 )
 
 func main() {
@@ -71,6 +72,7 @@ func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) e
 	fs := flag.NewFlagSet("rdma-metadata", flag.ContinueOnError)
 	fs.SetOutput(out)
 	device := fs.String("device", "", "RDMA device name")
+	maxGIDs := fs.Int("max-gids", defaultRDMAMetadataMaxGIDs, "maximum GID table entries to query")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -80,6 +82,9 @@ func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) e
 	if *device == "" {
 		return fmt.Errorf("device is required")
 	}
+	if *maxGIDs <= 0 {
+		return fmt.Errorf("max-gids %d must be positive", *maxGIDs)
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -88,7 +93,7 @@ func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) e
 		return err
 	}
 	defer dev.Close()
-	info, err := rdma.QueryPort(dev)
+	info, err := rdma.QueryPort(dev, *maxGIDs)
 	if err != nil {
 		return err
 	}
@@ -97,8 +102,8 @@ func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) e
 }
 
 func formatRDMAPortInfo(out io.Writer, info rdma.PortInfo) {
-	fmt.Fprintf(out, "rdma metadata device=%s port=%d lid=%d gid_tbl_len=%d selected_gid_index=%d\n",
-		info.Device, info.PortNum, info.LID, info.GIDTableLength, info.SelectedGIDIndex)
+	fmt.Fprintf(out, "rdma metadata device=%s port=%d lid=%d gid_tbl_len=%d gid_scan_limit=%d selected_gid_index=%d\n",
+		info.Device, info.PortNum, info.LID, info.GIDTableLength, info.GIDScanLimit, info.SelectedGIDIndex)
 	for _, entry := range info.GIDs {
 		fmt.Fprintf(out, "gid index=%d value=%s ipv4_mapped=%t zero=%t",
 			entry.Index, formatGID(entry.GID), entry.IPv4Mapped, entry.Zero)

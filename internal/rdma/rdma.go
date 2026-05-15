@@ -113,6 +113,7 @@ type PortInfo struct {
 	PortNum          int
 	LID              uint16
 	GIDTableLength   int
+	GIDScanLimit     int
 	SelectedGIDIndex int
 	GIDs             []GIDEntry
 }

@@ -226,11 +226,14 @@ func LocalDestination(qp *QueuePair) (Destination, error) {
 	}, nil
 }
 
-func QueryPort(dev *Device) (PortInfo, error) {
+func QueryPort(dev *Device, maxGIDs int) (PortInfo, error) {
 	if dev == nil || dev.handle == 0 {
 		return PortInfo{}, fmt.Errorf("query port: nil device")
 	}
-	port, gids, selected, err := queryPortGIDs(applerdma.RDMAContext(dev.handle))
+	if maxGIDs <= 0 {
+		return PortInfo{}, fmt.Errorf("query port: max gids %d must be positive", maxGIDs)
+	}
+	port, gids, selected, err := queryPortGIDs(applerdma.RDMAContext(dev.handle), maxGIDs)
 	if err != nil {
 		return PortInfo{}, err
 	}
@@ -239,6 +242,7 @@ func QueryPort(dev *Device) (PortInfo, error) {
 		PortNum:          1,
 		LID:              port.LID,
 		GIDTableLength:   int(port.GIDTblLen),
+		GIDScanLimit:     maxGIDs,
 		SelectedGIDIndex: selected,
 		GIDs:             make([]GIDEntry, 0, len(gids)),
 	}
@@ -326,7 +330,7 @@ func localPortGID(qp *QueuePair) (applerdma.IbvPortAttr, applerdma.IbvGID, int, 
 	if qp == nil || qp.handle == 0 || qp.pd == nil || qp.pd.dev == nil {
 		return applerdma.IbvPortAttr{}, applerdma.IbvGID{}, 0, fmt.Errorf("local destination: nil queue pair")
 	}
-	port, gids, selected, err := queryPortGIDs(applerdma.RDMAContext(qp.pd.dev.handle))
+	port, gids, selected, err := queryPortGIDs(applerdma.RDMAContext(qp.pd.dev.handle), 0)
 	if err != nil {
 		return applerdma.IbvPortAttr{}, applerdma.IbvGID{}, 0, err
 	}
@@ -343,7 +347,7 @@ type portGIDEntry struct {
 	gid   applerdma.IbvGID
 }
 
-func queryPortGIDs(ctx applerdma.RDMAContext) (applerdma.IbvPortAttr, []portGIDEntry, int, error) {
+func queryPortGIDs(ctx applerdma.RDMAContext, maxGIDs int) (applerdma.IbvPortAttr, []portGIDEntry, int, error) {
 	var port applerdma.IbvPortAttr
 	if rc, err := applerdma.Ibv_query_port(ctx, 1, uintptr(unsafe.Pointer(&port))); err != nil {
 		return applerdma.IbvPortAttr{}, nil, 0, fmt.Errorf("query port: %w", err)
@@ -351,11 +355,15 @@ func queryPortGIDs(ctx applerdma.RDMAContext) (applerdma.IbvPortAttr, []portGIDE
 		return applerdma.IbvPortAttr{}, nil, 0, fmt.Errorf("query port: errno %d", rc)
 	}
 
+	n := int(port.GIDTblLen)
+	if maxGIDs > 0 && maxGIDs < n {
+		n = maxGIDs
+	}
 	var gids []portGIDEntry
 	selected := 0
 	haveSelected := false
 	selectedIPv4 := false
-	for i := 0; i < int(port.GIDTblLen); i++ {
+	for i := 0; i < n; i++ {
 		var candidate applerdma.IbvGID
 		rc, err := applerdma.Ibv_query_gid(ctx, 1, i, uintptr(unsafe.Pointer(&candidate)))
 		if err != nil || rc != 0 {

@@ -72,7 +72,7 @@ Before attempting a new hardware path, collect provider metadata without moving
 any queue pair to RTR:
 
 ```sh
-jacclctl rdma-metadata -device rdma_en3
+jacclctl rdma-metadata -device rdma_en3 -max-gids 64
 ```
 
 This opens the device and queries port/GID metadata only. It does not allocate

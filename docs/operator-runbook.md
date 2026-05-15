@@ -32,13 +32,14 @@ For any new hardware path, collect provider port and GID metadata before any
 RTR attempt:
 
 ```sh
-jacclctl rdma-metadata -device rdma_en3
+jacclctl rdma-metadata -device rdma_en3 -max-gids 64
 ```
 
 This diagnostic opens the named device and queries port/GID metadata only. It
 does not allocate a protection domain, memory region, completion queue, or queue
-pair. Ordinary TCP reachability is not enough to prove the provider can route
-an RDMA QP to RTR.
+pair. `-max-gids` bounds the metadata scan; increase it only with a concrete
+reason and the same outer timeout. Ordinary TCP reachability is not enough to
+prove the provider can route an RDMA QP to RTR.
 
 Confirm both hosts will run the same binary:
 
