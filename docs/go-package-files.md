@@ -235,8 +235,8 @@ Package name: `main`.
 
 Files:
 
-- `main.go`: small operator control command for explicit `maintain` requests
-  over the jaccld Unix-domain socket, plus one-shot `tcp-diagnostic`
+- `main.go`: small operator control command for bounded explicit `maintain`
+  requests over the jaccld Unix-domain socket, plus one-shot `tcp-diagnostic`
   listen/dial checks for future direct non-loopback tcpchan proof.
 
 - `main_test.go`: command validation and loopback TCP diagnostic tests.

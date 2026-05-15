@@ -28,7 +28,7 @@ func main() {
 	var socket string
 	flag.StringVar(&socket, "socket", ipc.DefaultSocket, "jaccld Unix-domain socket path")
 	flag.Usage = func() {
-		fmt.Fprintf(flag.CommandLine.Output(), "usage: jacclctl [flags] maintain\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "usage: jacclctl [flags] maintain [-timeout duration]\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-metadata -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] tcp-diagnostic (-listen addr | -dial addr)\n")
 		flag.PrintDefaults()
@@ -42,16 +42,7 @@ func main() {
 	ctx := context.Background()
 	switch flag.Arg(0) {
 	case "maintain":
-		if flag.NArg() != 1 {
-			flag.Usage()
-			os.Exit(2)
-		}
-		client, err := ipc.Dial(ctx, socket)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer client.Close()
-		if err := client.Maintain(ctx); err != nil {
+		if err := runMaintainCommand(ctx, socket, flag.Args()[1:]); err != nil {
 			log.Fatal(err)
 		}
 	case "tcp-diagnostic":
@@ -66,6 +57,31 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func runMaintainCommand(ctx context.Context, socket string, args []string) error {
+	fs := flag.NewFlagSet("maintain", flag.ContinueOnError)
+	timeout := fs.Duration("timeout", 5*time.Second, "maintenance request timeout")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected maintain arguments")
+	}
+	if *timeout <= 0 {
+		return fmt.Errorf("timeout %s must be positive", *timeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	client, err := ipc.Dial(ctx, socket)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	if err := client.Maintain(ctx); err != nil {
+		return err
+	}
+	return nil
 }
 
 func runRDMAMetadataCommand(ctx context.Context, args []string, out io.Writer) error {

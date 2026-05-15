@@ -51,7 +51,7 @@ The maintenance operation is admitted explicitly through daemon control, for
 example:
 
 ```sh
-jacclctl maintain
+jacclctl maintain -timeout 5s
 ```
 
 It must:

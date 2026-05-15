@@ -3,14 +3,79 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/tmc/gojaccl/internal/rdma"
 )
+
+func TestRunMaintainCommandValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "bad timeout",
+			args: []string{"-timeout", "0"},
+			want: "timeout 0s must be positive",
+		},
+		{
+			name: "unexpected argument",
+			args: []string{"extra"},
+			want: "unexpected maintain arguments",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := runMaintainCommand(context.Background(), filepath.Join(t.TempDir(), "missing.sock"), tt.args)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runMaintainCommand = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunMaintainCommandTimesOut(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "jacclctl-maintain-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socket := filepath.Join(dir, "jaccld.sock")
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan net.Conn, 1)
+	go func() {
+		conn, err := ln.Accept()
+		if err == nil {
+			accepted <- conn
+			return
+		}
+		close(accepted)
+	}()
+
+	err = runMaintainCommand(context.Background(), socket, []string{"-timeout", "10ms"})
+	conn := <-accepted
+	if conn != nil {
+		defer conn.Close()
+	}
+	if err == nil {
+		t.Fatal("runMaintainCommand returned nil, want timeout")
+	}
+	var netErr net.Error
+	if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
+		t.Fatalf("runMaintainCommand = %v, want timeout", err)
+	}
+}
 
 func TestTCPDiagnosticLoopback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
