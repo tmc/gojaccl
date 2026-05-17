@@ -58,6 +58,8 @@ type daemonTransport struct {
 type daemonConn struct {
 	cq              *rdma.CompletionQueue
 	qp              *rdma.QueuePair
+	resources       *resource.Store
+	slots           *slotLedger
 	remoteHeartbeat daemonHeartbeatLease
 	pending         []rdma.WorkRequest
 	heartbeatWrites atomic.Uint64
@@ -284,15 +286,26 @@ func (l daemonHeartbeatLease) RDMA(now time.Time) (resource.HeartbeatMR, error) 
 func openDaemonConn(hw *hardware) (*daemonConn, rdma.Destination, error) {
 	cq, err := rdma.NewCompletionQueue(hw.dev, 64)
 	if err != nil {
+		hw.recordSlotFailed(resource.SlotCompletionQueue)
 		return nil, rdma.Destination{}, err
 	}
-	conn := &daemonConn{cq: cq}
+	if err := hw.recordSlotOpened(resource.SlotCompletionQueue); err != nil {
+		_ = cq.Close()
+		return nil, rdma.Destination{}, err
+	}
+	conn := &daemonConn{cq: cq, resources: hw.resources, slots: hw.slots}
 	defer func() {
 		if err != nil {
 			_ = conn.close()
 		}
 	}()
 	if conn.qp, err = rdma.NewQueuePair(hw.pd, conn.cq); err != nil {
+		hw.recordSlotFailed(resource.SlotQueuePair)
+		return nil, rdma.Destination{}, err
+	}
+	if err = hw.recordSlotOpened(resource.SlotQueuePair); err != nil {
+		_ = conn.qp.Close()
+		conn.qp = nil
 		return nil, rdma.Destination{}, err
 	}
 	if err = rdma.InitQueuePair(conn.qp); err != nil {
@@ -1012,14 +1025,46 @@ func (c *daemonConn) close() error {
 	if c.qp != nil {
 		if err := c.qp.Close(); err != nil && first == nil {
 			first = err
+		} else if err == nil {
+			if err := c.recordSlotClosed(resource.SlotQueuePair); err != nil && first == nil {
+				first = err
+			}
+			c.qp = nil
 		}
 	}
 	if c.cq != nil {
 		if err := c.cq.Close(); err != nil && first == nil {
 			first = err
+		} else if err == nil {
+			if err := c.recordSlotClosed(resource.SlotCompletionQueue); err != nil && first == nil {
+				first = err
+			}
+			c.cq = nil
 		}
 	}
 	return first
+}
+
+func (c *daemonConn) recordSlotClosed(kind resource.SlotKind) error {
+	if c == nil || c.slots == nil {
+		return nil
+	}
+	stats, err := c.slots.MarkClosed(kind)
+	if c.resources != nil {
+		c.resources.SetSlotStats(stats)
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("jaccld slot kind=%s opened=%d closed=%d outstanding=%d live=%d failed=%d",
+		kind,
+		stats.Counter(kind).Opened,
+		stats.Counter(kind).Closed,
+		stats.Counter(kind).Outstanding,
+		stats.Counter(kind).Live,
+		stats.Counter(kind).Failed,
+	)
+	return nil
 }
 
 func (c *daemonConn) recordHeartbeat(peer int, err error) {

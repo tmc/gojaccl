@@ -31,6 +31,7 @@ func main() {
 	flag.StringVar(&cfg.coordinator, "coordinator", "", "rank-zero TCP side-channel address")
 	flag.Int64Var(&cfg.slabSize, "slab-size", 1<<30, "shared slab size in bytes")
 	flag.IntVar(&cfg.maxSessions, "max-sessions", 128, "maximum local resource sessions")
+	flag.StringVar(&cfg.slotStateDir, "slot-state-dir", defaultSlotStateDir, "directory for per-boot jaccld slot counters")
 	flag.DurationVar(&cfg.controlPlaneLiveness, "control-plane-liveness", time.Minute, "provider-free session liveness pulse interval; zero disables")
 	flag.DurationVar(&cfg.heartbeat, "heartbeat", time.Minute, "experimental RDMA heartbeat interval")
 	flag.DurationVar(&cfg.heartbeatTimeout, "heartbeat-timeout", time.Second, "maximum experimental RDMA heartbeat completion wait")
@@ -55,6 +56,7 @@ type config struct {
 	coordinator               string
 	slabSize                  int64
 	maxSessions               int
+	slotStateDir              string
 	heartbeat                 time.Duration
 	heartbeatTimeout          time.Duration
 	heartbeatLeaseTTL         time.Duration
@@ -108,6 +110,12 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	log.Printf("jaccld phase=resource_store done max_sessions=%d", cfg.maxSessions)
+	slots, err := newSlotLedger(cfg.slotStateDir)
+	if err != nil {
+		return err
+	}
+	resources.SetSlotStats(slots.Stats())
+	log.Printf("jaccld phase=slot_ledger done boot_id=%q path=%q", slots.Stats().BootID, slots.Stats().StatePath)
 	if cfg.controlPlaneLiveness > 0 {
 		go func() {
 			if err := resources.RunControlPlaneLiveness(ctx, cfg.controlPlaneLiveness); err != nil && !errors.Is(err, context.Canceled) {
@@ -127,7 +135,7 @@ func run(ctx context.Context, cfg config) error {
 
 	var hw *hardware
 	if !cfg.noRDMA {
-		hw, err = openHardware(cfg.device, slab)
+		hw, err = openHardware(cfg.device, slab, resources, slots)
 		if err != nil {
 			return err
 		}
@@ -236,19 +244,21 @@ func loopbackCoordinator(addr string) bool {
 }
 
 type hardware struct {
-	dev *rdma.Device
-	pd  *rdma.ProtectionDomain
-	mr  *rdma.MemoryRegion
+	dev       *rdma.Device
+	pd        *rdma.ProtectionDomain
+	mr        *rdma.MemoryRegion
+	resources *resource.Store
+	slots     *slotLedger
 }
 
-func openHardware(device string, slab *allocator.Slab) (*hardware, error) {
+func openHardware(device string, slab *allocator.Slab, resources *resource.Store, slots *slotLedger) (*hardware, error) {
 	log.Printf("jaccld phase=hardware_open start device=%q", device)
 	dev, err := rdma.OpenDevice(device)
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("jaccld phase=hardware_open device_done name=%q", dev.Name())
-	hw := &hardware{dev: dev}
+	hw := &hardware{dev: dev, resources: resources, slots: slots}
 	defer func() {
 		if err != nil {
 			_ = hw.Close()
@@ -256,11 +266,19 @@ func openHardware(device string, slab *allocator.Slab) (*hardware, error) {
 	}()
 	log.Printf("jaccld phase=pd_alloc start")
 	if hw.pd, err = rdma.NewProtectionDomain(dev); err != nil {
+		hw.recordSlotFailed(resource.SlotProtectionDomain)
+		return nil, err
+	}
+	if err = hw.recordSlotOpened(resource.SlotProtectionDomain); err != nil {
 		return nil, err
 	}
 	log.Printf("jaccld phase=pd_alloc done")
 	log.Printf("jaccld phase=mr_register start length=%d", len(slab.Bytes()))
 	if hw.mr, err = rdma.RegisterMemory(hw.pd, slab.Bytes()); err != nil {
+		hw.recordSlotFailed(resource.SlotMemoryRegion)
+		return nil, err
+	}
+	if err = hw.recordSlotOpened(resource.SlotMemoryRegion); err != nil {
 		return nil, err
 	}
 	log.Printf("jaccld phase=mr_register done addr_nonzero=%t lkey_nonzero=%t rkey_nonzero=%t length=%d",
@@ -280,11 +298,21 @@ func (h *hardware) Close() error {
 	if h.mr != nil {
 		if err := h.mr.Close(); err != nil && first == nil {
 			first = err
+		} else if err == nil {
+			if err := h.recordSlotClosed(resource.SlotMemoryRegion); err != nil && first == nil {
+				first = err
+			}
+			h.mr = nil
 		}
 	}
 	if h.pd != nil {
 		if err := h.pd.Close(); err != nil && first == nil {
 			first = err
+		} else if err == nil {
+			if err := h.recordSlotClosed(resource.SlotProtectionDomain); err != nil && first == nil {
+				first = err
+			}
+			h.pd = nil
 		}
 	}
 	if h.dev != nil {
@@ -293,4 +321,63 @@ func (h *hardware) Close() error {
 		}
 	}
 	return first
+}
+
+func (h *hardware) recordSlotOpened(kind resource.SlotKind) error {
+	if h == nil || h.slots == nil {
+		return nil
+	}
+	stats, err := h.slots.MarkOpened(kind)
+	if h.resources != nil {
+		h.resources.SetSlotStats(stats)
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("jaccld slot kind=%s opened=%d closed=%d outstanding=%d live=%d failed=%d",
+		kind,
+		stats.Counter(kind).Opened,
+		stats.Counter(kind).Closed,
+		stats.Counter(kind).Outstanding,
+		stats.Counter(kind).Live,
+		stats.Counter(kind).Failed,
+	)
+	return nil
+}
+
+func (h *hardware) recordSlotClosed(kind resource.SlotKind) error {
+	if h == nil || h.slots == nil {
+		return nil
+	}
+	stats, err := h.slots.MarkClosed(kind)
+	if h.resources != nil {
+		h.resources.SetSlotStats(stats)
+	}
+	if err != nil {
+		return err
+	}
+	log.Printf("jaccld slot kind=%s opened=%d closed=%d outstanding=%d live=%d failed=%d",
+		kind,
+		stats.Counter(kind).Opened,
+		stats.Counter(kind).Closed,
+		stats.Counter(kind).Outstanding,
+		stats.Counter(kind).Live,
+		stats.Counter(kind).Failed,
+	)
+	return nil
+}
+
+func (h *hardware) recordSlotFailed(kind resource.SlotKind) {
+	if h == nil || h.slots == nil {
+		return
+	}
+	stats, err := h.slots.MarkFailed(kind)
+	if h.resources != nil {
+		h.resources.SetSlotStats(stats)
+	}
+	if err != nil {
+		log.Printf("jaccld slot kind=%s record_failed err=%v", kind, err)
+		return
+	}
+	log.Printf("jaccld slot kind=%s failed=%d", kind, stats.Counter(kind).Failed)
 }

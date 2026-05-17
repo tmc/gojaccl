@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/rdma"
 )
 
@@ -74,6 +75,74 @@ func TestRunMaintainCommandTimesOut(t *testing.T) {
 	var netErr net.Error
 	if !errors.Is(err, context.DeadlineExceeded) && (!errors.As(err, &netErr) || !netErr.Timeout()) {
 		t.Fatalf("runMaintainCommand = %v, want timeout", err)
+	}
+}
+
+func TestRunStatsCommandValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "bad timeout",
+			args: []string{"-timeout", "0"},
+			want: "timeout 0s must be positive",
+		},
+		{
+			name: "unexpected argument",
+			args: []string{"extra"},
+			want: "unexpected stats arguments",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runStatsCommand(context.Background(), filepath.Join(t.TempDir(), "missing.sock"), tt.args, &out)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runStatsCommand = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatResourceStats(t *testing.T) {
+	stats := resource.Stats{
+		State:  resource.StateReady,
+		Leases: 1,
+		MemoryRegions: resource.PoolStats{
+			InUse:          1,
+			Available:      -1,
+			BytesInUse:     16,
+			BytesAvailable: 4080,
+		},
+		QueuePairs:       resource.PoolStats{InUse: 1, Available: 3},
+		CompletionQueues: resource.PoolStats{InUse: 1, Available: 3},
+		Slots: resource.SlotStats{
+			BootID:             "boot-1",
+			Source:             "jaccld-observed",
+			StatePath:          "/tmp/jaccld/slots/boot-1.json",
+			ExternalUseUnknown: true,
+			ProtectionDomains:  resource.SlotCounter{Opened: 1, Outstanding: 1, Live: 1},
+			MemoryRegions:      resource.SlotCounter{Opened: 1, Outstanding: 1, Live: 1},
+			QueuePairs:         resource.SlotCounter{Opened: 2, Closed: 1, Outstanding: 1, Live: 1},
+			CompletionQueues:   resource.SlotCounter{Failed: 1},
+		},
+	}
+	var out bytes.Buffer
+	formatResourceStats(&out, stats)
+	got := out.String()
+	for _, want := range []string{
+		"jaccld resource state=ready leases=1",
+		"pool memory_regions in_use=1 available=-1 bytes_in_use=16 bytes_available=4080",
+		"slot_ledger boot_id=\"boot-1\" source=\"jaccld-observed\" external_use_unknown=true state_path=\"/tmp/jaccld/slots/boot-1.json\"",
+		"slot kind=protection_domain opened=1 closed=0 outstanding=1 live=1 failed=0",
+		"slot kind=queue_pair opened=2 closed=1 outstanding=1 live=1 failed=0",
+		"slot kind=completion_queue opened=0 closed=0 outstanding=0 live=0 failed=1",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stats output missing %q in:\n%s", want, got)
+		}
 	}
 }
 

@@ -20,6 +20,7 @@ type Store struct {
 	mr     MRPool
 	qp     QueuePairPool
 	cq     CompletionQueuePool
+	slots  SlotStats
 	leases map[LeaseID]SessionLease
 }
 
@@ -66,6 +67,13 @@ func (s *Store) SetState(state State) error {
 	}
 	s.state = state
 	return nil
+}
+
+// SetSlotStats records jaccld-observed scarce provider slot counters.
+func (s *Store) SetSlotStats(stats SlotStats) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.slots = stats
 }
 
 // Open leases daemon-owned resources for one client session.
@@ -288,6 +296,7 @@ func (s *Store) Stats() Stats {
 		MemoryRegions:    s.mr.MRStats(),
 		QueuePairs:       s.qp.QueuePairStats(),
 		CompletionQueues: s.cq.CompletionQueueStats(),
+		Slots:            s.slots,
 	}
 }
 

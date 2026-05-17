@@ -50,6 +50,28 @@ func TestStoreOpenClose(t *testing.T) {
 	}
 }
 
+func TestStoreSlotStats(t *testing.T) {
+	store, _ := newTestStore(t)
+	slots := SlotStats{
+		BootID:             "boot-1",
+		Source:             "jaccld-observed",
+		ExternalUseUnknown: true,
+		ProtectionDomains: SlotCounter{
+			Opened:      1,
+			Outstanding: 1,
+			Live:        1,
+		},
+	}
+	store.SetSlotStats(slots)
+	got := store.Stats().Slots
+	if got.BootID != "boot-1" || got.Source != "jaccld-observed" || !got.ExternalUseUnknown {
+		t.Fatalf("slot metadata = %+v, want boot/source/external unknown", got)
+	}
+	if got.Counter(SlotProtectionDomain).Opened != 1 || got.Counter(SlotProtectionDomain).Outstanding != 1 || got.Counter(SlotProtectionDomain).Live != 1 {
+		t.Fatalf("protection domain slot counter = %+v, want opened/outstanding/live", got.Counter(SlotProtectionDomain))
+	}
+}
+
 func TestStoreNeedsReady(t *testing.T) {
 	store, _ := newTestStore(t)
 	now := time.Unix(100, 0)

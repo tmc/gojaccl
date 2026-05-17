@@ -129,7 +129,8 @@ protocol is intentionally small:
 - `session_lookup`: return current live session lease metadata, including
   provider-free liveness fields; expired leases fail closed.
 - `session_close`: release a session lease.
-- `session_stats`: return resource-store use.
+- `session_stats`: return resource-store use and jaccld-observed scarce slot
+  counters for the current boot.
 - `submit_reduce`: start daemon-owned all-reduce work over leased slab ranges.
 - `submit_gather`: start daemon-owned all-gather work over leased slab ranges.
 - `wait_work`: poll asynchronous daemon work for completion.
@@ -144,6 +145,18 @@ to the connection that allocated them so the server can release memory when a
 client crashes, but disconnect waits for in-flight work to stop before freeing
 those leases. Resource session leases are also scoped to the connection, so
 disconnect releases the logical MR, queue-pair, and completion-queue handles.
+
+`jaccld` also records a boot-scoped slot ledger for scarce provider resources it
+allocates itself. The ledger reports successful opens, successful close calls,
+failed open attempts, outstanding opens, and resources live in the current
+daemon process for protection domains, memory regions, queue pairs, and
+completion queues. It is deliberately labeled jaccld-observed: unrelated
+processes can still consume provider slots without appearing in this ledger.
+Operators can read the ledger through `session_stats` or:
+
+```sh
+jacclctl stats
+```
 
 ## Planner Data
 
@@ -164,8 +177,8 @@ lease expiry. It does not decide tensor parallelism policy.
 - `cmd/jaccld/main.go`: command entry point, flags, signals, singleton hardware
   startup, and UDS listener.
 - `cmd/jacclctl/main.go`: operator control command for explicit daemon
-  maintenance requests, provider metadata collection, and one-shot direct TCP
-  diagnostics.
+  maintenance requests, jaccld resource and slot stats, provider metadata
+  collection, and one-shot direct TCP diagnostics.
 - `cmd/jaccld/admission.go`: provider-free admission gate used to stop new
   daemon data operations and wait for in-flight work before a future
   maintenance window.

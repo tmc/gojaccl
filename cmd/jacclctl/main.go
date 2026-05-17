@@ -1,8 +1,14 @@
 // Command jacclctl sends operator control requests to jaccld.
+//
+// The stats subcommand reports daemon resource leases and jaccld-observed
+// scarce provider slot counters. The maintain subcommand asks a daemon to run
+// explicit same-data-QP maintenance. The rdma-metadata and tcp-diagnostic
+// subcommands are bounded operator preflights.
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -13,6 +19,7 @@ import (
 	"time"
 
 	"github.com/tmc/gojaccl/internal/ipc"
+	"github.com/tmc/gojaccl/internal/jaccld/resource"
 	"github.com/tmc/gojaccl/internal/rdma"
 	"github.com/tmc/gojaccl/internal/tcpchan"
 )
@@ -29,6 +36,7 @@ func main() {
 	flag.StringVar(&socket, "socket", ipc.DefaultSocket, "jaccld Unix-domain socket path")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: jacclctl [flags] maintain [-timeout duration]\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] stats [-timeout duration] [-json]\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-metadata -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] tcp-diagnostic (-listen addr | -dial addr)\n")
 		flag.PrintDefaults()
@@ -45,6 +53,10 @@ func main() {
 		if err := runMaintainCommand(ctx, socket, flag.Args()[1:]); err != nil {
 			log.Fatal(err)
 		}
+	case "stats":
+		if err := runStatsCommand(ctx, socket, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
 	case "tcp-diagnostic":
 		if err := runTCPDiagnosticCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatal(err)
@@ -57,6 +69,60 @@ func main() {
 		flag.Usage()
 		os.Exit(2)
 	}
+}
+
+func runStatsCommand(ctx context.Context, socket string, args []string, out io.Writer) error {
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	fs.SetOutput(out)
+	timeout := fs.Duration("timeout", 5*time.Second, "stats request timeout")
+	jsonOut := fs.Bool("json", false, "print JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected stats arguments")
+	}
+	if *timeout <= 0 {
+		return fmt.Errorf("timeout %s must be positive", *timeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, *timeout)
+	defer cancel()
+	client, err := ipc.Dial(ctx, socket)
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+	stats, err := client.ResourceStats(ctx)
+	if err != nil {
+		return err
+	}
+	if *jsonOut {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(stats)
+	}
+	formatResourceStats(out, stats)
+	return nil
+}
+
+func formatResourceStats(out io.Writer, stats resource.Stats) {
+	fmt.Fprintf(out, "jaccld resource state=%s leases=%d\n", stats.State, stats.Leases)
+	fmt.Fprintf(out, "pool memory_regions in_use=%d available=%d bytes_in_use=%d bytes_available=%d\n",
+		stats.MemoryRegions.InUse, stats.MemoryRegions.Available, stats.MemoryRegions.BytesInUse, stats.MemoryRegions.BytesAvailable)
+	fmt.Fprintf(out, "pool queue_pairs in_use=%d available=%d\n", stats.QueuePairs.InUse, stats.QueuePairs.Available)
+	fmt.Fprintf(out, "pool completion_queues in_use=%d available=%d\n", stats.CompletionQueues.InUse, stats.CompletionQueues.Available)
+	slots := stats.Slots
+	fmt.Fprintf(out, "slot_ledger boot_id=%q source=%q external_use_unknown=%t state_path=%q\n",
+		slots.BootID, slots.Source, slots.ExternalUseUnknown, slots.StatePath)
+	formatSlotCounter(out, resource.SlotProtectionDomain, slots.ProtectionDomains)
+	formatSlotCounter(out, resource.SlotMemoryRegion, slots.MemoryRegions)
+	formatSlotCounter(out, resource.SlotQueuePair, slots.QueuePairs)
+	formatSlotCounter(out, resource.SlotCompletionQueue, slots.CompletionQueues)
+}
+
+func formatSlotCounter(out io.Writer, kind resource.SlotKind, c resource.SlotCounter) {
+	fmt.Fprintf(out, "slot kind=%s opened=%d closed=%d outstanding=%d live=%d failed=%d\n",
+		kind, c.Opened, c.Closed, c.Outstanding, c.Live, c.Failed)
 }
 
 func runMaintainCommand(ctx context.Context, socket string, args []string) error {

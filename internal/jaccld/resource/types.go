@@ -48,6 +48,30 @@ func (s State) String() string {
 	}
 }
 
+// MarshalText encodes s as its string form.
+func (s State) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
+// UnmarshalText decodes s from its string form.
+func (s *State) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "bootstrapping":
+		*s = StateBootstrapping
+	case "opening":
+		*s = StateOpening
+	case "ready":
+		*s = StateReady
+	case "draining":
+		*s = StateDraining
+	case "terminated":
+		*s = StateTerminated
+	default:
+		return fmt.Errorf("%w: %s", ErrInvalidState, text)
+	}
+	return nil
+}
+
 // LeaseID identifies a daemon-issued session lease.
 type LeaseID uint64
 
@@ -166,4 +190,59 @@ type Stats struct {
 	MemoryRegions    PoolStats
 	QueuePairs       PoolStats
 	CompletionQueues PoolStats
+	Slots            SlotStats
+}
+
+// SlotKind identifies a scarce provider resource class.
+type SlotKind string
+
+const (
+	SlotProtectionDomain SlotKind = "protection_domain"
+	SlotMemoryRegion     SlotKind = "memory_region"
+	SlotQueuePair        SlotKind = "queue_pair"
+	SlotCompletionQueue  SlotKind = "completion_queue"
+)
+
+// SlotCounter reports jaccld-observed use of one scarce provider resource.
+//
+// Opened, Closed, and Failed are boot-scoped counters recorded by jaccld. Live
+// reports resources currently owned by this daemon process. Outstanding is
+// Opened minus Closed and may include resources left behind by a previous
+// daemon process in the same boot. These counters do not include resources
+// allocated by unrelated processes.
+type SlotCounter struct {
+	Opened      uint64
+	Closed      uint64
+	Failed      uint64
+	Outstanding uint64
+	Live        int
+}
+
+// SlotStats reports jaccld-observed scarce provider resource use for one boot.
+type SlotStats struct {
+	BootID             string
+	Source             string
+	StatePath          string
+	ExternalUseUnknown bool
+
+	ProtectionDomains SlotCounter
+	MemoryRegions     SlotCounter
+	QueuePairs        SlotCounter
+	CompletionQueues  SlotCounter
+}
+
+// Counter reports the counter for kind.
+func (s SlotStats) Counter(kind SlotKind) SlotCounter {
+	switch kind {
+	case SlotProtectionDomain:
+		return s.ProtectionDomains
+	case SlotMemoryRegion:
+		return s.MemoryRegions
+	case SlotQueuePair:
+		return s.QueuePairs
+	case SlotCompletionQueue:
+		return s.CompletionQueues
+	default:
+		return SlotCounter{}
+	}
 }
