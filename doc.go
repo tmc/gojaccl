@@ -27,6 +27,11 @@
 // traffic to io.Writer and io.Reader for streaming use with packages such as
 // io and bufio.
 //
+// The package does not expose a net.Conn adapter. A Group serializes
+// collectives, point-to-point operations, and streams, so it does not provide
+// the independent full-duplex operation or deadline semantics expected of
+// net.Conn.
+//
 // Collective functions validate slice lengths before posting RDMA work. AllSum,
 // AllMax, and AllMin require dst and src to have the same length. They support
 // in-place operation when dst and src are the same slice. AllGather requires

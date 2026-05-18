@@ -4,6 +4,10 @@
 explicit deployment envelope. It is not a background heartbeat and it is not a
 general topology claim.
 
+The accepted artifacts prove that envelope for the captured binaries. Later
+hardening commits are static/no-hardware improvements until the same bounded
+physical proof is rerun for the new binary hash.
+
 ## Accepted Claim
 
 Explicit same-data-QP maintenance has passed two-host Apple Thunderbolt RDMA
@@ -20,22 +24,10 @@ proofs with:
   postflight failure;
 - clean daemon and tunnel cleanup.
 
-The SSH-forwarded loopback `tcpchan` artifact is:
-
-```text
-/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z
-/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z.tar.gz
-sha256 fd36e9726440a1224fafc9890184bbbc5321c114c3390baca25c2c7d2c054c67
-```
-
-The direct non-loopback `tcpchan` artifact for the same two-host `rdma_en1`
-setup is:
-
-```text
-/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z
-/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z.tar.gz
-sha256 3b52dd281e4b3493e0b90d5018e21a11c4c74ec3e7894f13f1ff88754caaf9bb
-```
+The SSH-forwarded loopback `tcpchan` proof and direct non-loopback `tcpchan`
+proof are preserved as local artifact bundles. Reusable docs should describe
+the accepted claim and required evidence, not embed machine-local artifact
+paths.
 
 The accepted production statement is:
 

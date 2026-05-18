@@ -30,7 +30,17 @@ MLX, or Go processes must not own RDMA PD or MR lifetimes directly.
 
 ## Process Model
 
-On startup, `jaccld`:
+`jaccld` is intended to become a boot-scoped hardware owner: one daemon per
+host per OS boot, with topology sessions created after startup. The current
+RDMA transport implementation is still a static topology mode used by the
+accepted proof packets. It binds `-rank`, `-size`, and `-coordinator` at daemon
+startup and forms one fixed daemon transport.
+
+That static mode is evidence for the accepted two-host `rdma_en1` envelope, not
+the final flexible-topology production API. See
+`docs/jaccld-dynamic-topology.md` for the target boot-daemon/session split.
+
+In the current static RDMA mode, `jaccld`:
 
 1. Validates `-rank`, `-size`, and `-coordinator` unless `-no-rdma` is set.
    The supported production coordinator is loopback, usually reached through
@@ -47,7 +57,7 @@ On startup, `jaccld`:
 9. Listens on a Unix-domain socket in an owner-only runtime directory. Custom
    socket paths must also be placed in an owner-only directory.
 
-The daemon releases RDMA resources only during daemon shutdown. Client
+The daemon releases boot-scoped RDMA resources only during daemon shutdown. Client
 disconnect, crash, or cancellation may release logical leases, but must not
 close the hardware context.
 
@@ -138,6 +148,12 @@ protocol is intentionally small:
 This is a control protocol, not a tensor planner. Tensor-parallel decisions and
 mesh placement remain outside `jaccld`.
 
+The current IPC resource sessions are not yet full topology sessions. They
+lease daemon-owned resource handles for local clients, but they do not yet
+create flexible rank maps or change the daemon's peer graph. A future topology
+session API should move rank, size, coordinator, and peer selection out of
+daemon startup.
+
 Most IPC operations are request/response. Collective work is explicitly
 asynchronous: a submit request returns a work ID, and `wait_work` reports
 completion without blocking unrelated control requests. Slab leases are scoped
@@ -195,6 +211,8 @@ lease expiry. It does not decide tensor parallelism policy.
   MR lease rules.
 - `docs/jaccld-data-qp-keepalive.md`: proven data-QP maintenance envelope,
   rejected paths, and remaining exclusions.
+- `docs/jaccld-dynamic-topology.md`: target boot-scoped daemon and dynamic
+  topology-session model.
 - `docs/operator-runbook.md`: operator checklist for the supported two-host
   `rdma_en1` deployment.
 - `internal/keepalive/heartbeat.go`: idle-route heartbeat scheduling.
@@ -203,6 +221,8 @@ lease expiry. It does not decide tensor parallelism policy.
 
 Do not bind `ibv_alloc_pd` to a UDS connection, a `Group`, or a client process.
 Do not register memory for every tensor or transfer.
+Do not claim flexible production topology while `-rank`, `-size`, and
+`-coordinator` are startup-bound static RDMA-mode flags.
 Do not use background SEND heartbeats on the data queue pair; they can consume
 user receives. Do not treat RDMA_WRITE heartbeats as production on Apple
 Thunderbolt RDMA while the provider publishes zero remote keys. Do not run a

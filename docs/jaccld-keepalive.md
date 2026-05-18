@@ -92,10 +92,9 @@ proved with SSH-forwarded loopback `tcpchan` and, for the documented `rdma_en1`
 IP pair only, direct non-loopback `tcpchan` with explicit
 `-allow-remote-tcpchan`.
 
-The preserved proof artifacts are:
-
-- `/Users/tmc/tmp/gojaccl-jaccld-dataqp-maintenance-proof-sshchan-20260514T090333Z`
-- `/Users/tmc/tmp/gojaccl-direct-tcpchan-rdma-en1-proof-20260514T224843Z`
+The preserved proof artifact paths and hashes are local run evidence. Keep them
+with the proof bundle rather than embedding machine-local paths in reusable
+docs.
 
 RDMA_WRITE heartbeat production readiness, arbitrary rank counts,
 non-`rdma_en1` devices, and arbitrary non-loopback deployments remain excluded
