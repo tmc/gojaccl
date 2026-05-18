@@ -86,11 +86,12 @@ For the current post-reboot `rdma_en1` `errno 60` state, use the gated
 metadata packet:
 
 ```sh
-REMOTE=<peer-ssh> \
-REMOTE_TMP=<peer-tmp-dir> \
-EXPECTED_SELECTED_GID_INDEX=1 \
-  CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
-  scripts/rdma-en1-metadata-packet.sh
+CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
+  go run ./cmd/jacclproof rdma-metadata \
+    -device rdma_en1 \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir> \
+    -expected-selected-gid-index 1
 ```
 
 This packet classifies metadata collection only. It is not a reproof packet and
@@ -231,6 +232,26 @@ failure, provider error, or CQ error. Do not retry the proof after such a
 failure.
 
 After the idle window, run the daemon-backed datapath smoke again.
+
+The reviewed one-shot soak packet is implemented as a Go command, not as an
+in-repo shell script:
+
+```sh
+CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak \
+  go run ./cmd/jacclproof rdma-soak \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir> \
+    -local-rdma-ip <local-rdma-ip> \
+    -remote-rdma-ip <peer-rdma-ip> \
+    -soak-seconds 7200
+```
+
+It runs the safe gates, builds and hashes both host binaries, runs the gated
+metadata packet, checks direct TCP diagnostics, supervises both daemon ranks,
+runs pre/post daemon-backed smoke, posts one maintenance round per rank every
+60 seconds, captures stats and postflight state, and preserves a tarred
+artifact under `~/tmp`. It remains a one-shot hardware proof; stop and do not
+retry after any required gate fails.
 
 ## Postflight
 

@@ -107,18 +107,19 @@ jacclctl rdma-metadata -device rdma_en3 -max-gids 64
 This opens the device and queries port/GID metadata only. It does not allocate
 PDs, MRs, CQs, or QPs, and it does not post work requests.
 
-For the current post-reboot `rdma_en1` `errno 60` state, use the gated packet
-script instead of ad hoc commands:
+For the current post-reboot `rdma_en1` `errno 60` state, use the gated
+`jacclproof` packet command instead of ad hoc commands:
 
 ```sh
-REMOTE=<peer-ssh> \
-REMOTE_TMP=<peer-tmp-dir> \
-EXPECTED_SELECTED_GID_INDEX=<expected-gid-index> \
-  CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
-  scripts/rdma-en1-metadata-packet.sh
+CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
+  go run ./cmd/jacclproof rdma-metadata \
+    -device rdma_en1 \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir> \
+    -expected-selected-gid-index <expected-gid-index>
 ```
 
-The script preserves a timestamped artifact under `~/tmp` and still does not
+The command preserves a timestamped artifact under `~/tmp` and still does not
 authorize RTR. Its final evaluator only classifies metadata collection.
 
 An operator can trigger the explicit maintenance operation through the daemon
@@ -127,6 +128,12 @@ socket:
 ```sh
 jacclctl maintain -timeout 5s
 ```
+
+The reviewed one-shot hardware packet is `jacclproof rdma-soak`. It runs the
+safe gates, metadata packet, direct TCP diagnostic, supervised daemons, pre/post
+smoke, 60-second maintenance cadence, stats captures, postflight, cleanup, and
+artifact packaging. It refuses without
+`CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak`.
 
 Operators can inspect daemon resource leases and jaccld-observed provider slot
 counters without touching RDMA hardware:
@@ -169,7 +176,7 @@ postflight `rdma_en1` active on both hosts, and cleanup clean.
 
 The proof artifacts are evidence for that exact deployment envelope and captured
 binary. Later commits that affect provider setup, transport behavior, daemon
-lifecycle, proof scripts, maintenance semantics, stream adapters, or workload
+lifecycle, proof commands, maintenance semantics, stream adapters, or workload
 proof surfaces require a fresh bounded `rdma_en1` proof before that exact binary
 can be called physically proven. RDMA_WRITE heartbeat production readiness,
 arbitrary rank counts, non-`rdma_en1` layouts, and arbitrary non-loopback
