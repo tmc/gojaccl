@@ -1,8 +1,7 @@
 # Go JACCL API Spec
 
-This document sketches a Go API for a JACCL implementation. It is based on the
-current MLX JACCL C++ sources in this directory and an initial NotebookLM
-Go-team-style API review.
+This document records the Go API design for JACCL. It is based on the current
+MLX JACCL C++ sources in this directory and Go API design principles.
 
 ## Source Facts
 
@@ -82,7 +81,7 @@ Internal packages:
 - `internal/topology` validates mesh and ring connectivity.
 - `internal/reduce` contains local reduction kernels and dtype dispatch.
 
-## Minimal API Sketch
+## Public API
 
 Build constraint: `//go:build darwin && arm64`.
 

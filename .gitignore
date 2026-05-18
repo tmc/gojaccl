@@ -1,2 +1,12 @@
 *.test
 coverage.out
+docs/go-doc-output.txt
+docs/go-test-output.txt
+docs/north-star-checklist-*.md
+docs/production-readiness-audit-*.md
+docs/production-readiness-closeout-*.md
+docs/proof-closeout-*.md
+docs/rdma-*-operator-packet.md
+docs/rdma-*-proof-packet.md
+docs/rdma-*-reproof-packet.md
+docs/rdma-*-soak-packet.md

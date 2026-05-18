@@ -2,7 +2,9 @@ package jaccl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -224,7 +226,11 @@ func assertDoesNotCompile(t *testing.T, body string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mod := "module tmp\n\ngo 1.24\n\nrequire (\n\tgithub.com/tmc/gojaccl v0.0.0\n\tgithub.com/tmc/apple v0.0.0\n)\n\nreplace github.com/tmc/gojaccl => " + filepath.ToSlash(wd) + "\nreplace github.com/tmc/apple => /Users/tmc/go/src/github.com/tmc/apple\n"
+	appleVersion, appleReplace := appleModuleForCompileTest(t, wd)
+	mod := fmt.Sprintf("module tmp\n\ngo 1.24\n\nrequire (\n\tgithub.com/tmc/gojaccl v0.0.0\n\tgithub.com/tmc/apple %s\n)\n\nreplace github.com/tmc/gojaccl => %s\n", appleVersion, filepath.ToSlash(wd))
+	if appleReplace != "" {
+		mod += "replace github.com/tmc/apple => " + filepath.ToSlash(appleReplace) + "\n"
+	}
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte(mod), 0o666); err != nil {
 		t.Fatal(err)
 	}
@@ -251,4 +257,33 @@ func main() {
 	if !strings.Contains(string(out), "does not satisfy") && !strings.Contains(string(out), "not in") {
 		t.Fatalf("compile failed for unexpected reason:\n%s", out)
 	}
+}
+
+func appleModuleForCompileTest(t *testing.T, wd string) (version, replace string) {
+	t.Helper()
+	if dir := os.Getenv("JACCL_TEST_APPLE_REPLACE"); dir != "" {
+		return "v0.0.0", dir
+	}
+	cmd := exec.Command("go", "list", "-m", "-json", "github.com/tmc/apple")
+	cmd.Dir = wd
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("go list github.com/tmc/apple: %v", err)
+	}
+	var info struct {
+		Version string
+		Replace *struct {
+			Dir string
+		}
+	}
+	if err := json.Unmarshal(out, &info); err != nil {
+		t.Fatalf("parse go list github.com/tmc/apple: %v", err)
+	}
+	if info.Version == "" {
+		info.Version = "v0.0.0"
+	}
+	if info.Replace != nil {
+		replace = info.Replace.Dir
+	}
+	return info.Version, replace
 }

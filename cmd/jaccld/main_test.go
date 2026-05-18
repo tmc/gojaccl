@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,12 +49,12 @@ func TestConfigValidateRDMA(t *testing.T) {
 		},
 		{
 			name: "remote coordinator rejected",
-			cfg:  config{rank: 0, size: 2, coordinator: "10.0.18.249:12345", heartbeat: time.Second},
-			want: `coordinator "10.0.18.249:12345" is not loopback`,
+			cfg:  config{rank: 0, size: 2, coordinator: "198.51.100.10:12345", heartbeat: time.Second},
+			want: `coordinator "198.51.100.10:12345" is not loopback`,
 		},
 		{
 			name: "remote coordinator explicitly allowed",
-			cfg:  config{rank: 0, size: 2, coordinator: "10.0.18.249:12345", heartbeat: time.Second, allowRemoteTCPChan: true},
+			cfg:  config{rank: 0, size: 2, coordinator: "198.51.100.10:12345", heartbeat: time.Second, allowRemoteTCPChan: true},
 		},
 		{
 			name: "ipv6 loopback",
@@ -111,15 +112,17 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	socket := fmt.Sprintf("/tmp/jaccld-nordma-%d.sock", time.Now().UnixNano())
+	socket := testSocketPath(t, "jaccld-nordma")
+	slotStateDir := t.TempDir()
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	errc := make(chan error, 1)
 	go func() {
 		errc <- run(ctx, config{
-			socket:      socket,
-			slabSize:    4096,
-			maxSessions: 2,
-			noRDMA:      true,
+			socket:       socket,
+			slabSize:     4096,
+			maxSessions:  2,
+			slotStateDir: slotStateDir,
+			noRDMA:       true,
 		})
 	}()
 
@@ -140,6 +143,9 @@ func TestRunNoRDMAStartsIPC(t *testing.T) {
 	if resourceStats.Leases != 0 || resourceStats.QueuePairs.Available != 2 || resourceStats.CompletionQueues.Available != 2 {
 		t.Fatalf("resource stats = %+v, want empty store with two handles", resourceStats)
 	}
+	if resourceStats.Slots.BootID == "" || resourceStats.Slots.Source != "jaccld-observed" || !resourceStats.Slots.ExternalUseUnknown {
+		t.Fatalf("slot stats = %+v, want jaccld-observed boot-scoped stats", resourceStats.Slots)
+	}
 	if err := client.Barrier(context.Background()); err == nil || !strings.Contains(err.Error(), ipc.ErrNoTransport.Error()) {
 		t.Fatalf("Barrier = %v, want %q", err, ipc.ErrNoTransport)
 	}
@@ -159,7 +165,8 @@ func TestRunControlPlaneLivenessUpdatesSession(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	socket := fmt.Sprintf("/tmp/jaccld-liveness-%d.sock", time.Now().UnixNano())
+	socket := testSocketPath(t, "jaccld-liveness")
+	slotStateDir := t.TempDir()
 	t.Cleanup(func() { _ = os.Remove(socket) })
 	errc := make(chan error, 1)
 	go func() {
@@ -167,6 +174,7 @@ func TestRunControlPlaneLivenessUpdatesSession(t *testing.T) {
 			socket:               socket,
 			slabSize:             4096,
 			maxSessions:          1,
+			slotStateDir:         slotStateDir,
 			controlPlaneLiveness: 5 * time.Millisecond,
 			noRDMA:               true,
 		})
@@ -214,6 +222,21 @@ func TestRunControlPlaneLivenessUpdatesSession(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("run did not stop after cancel")
 	}
+}
+
+func testSocketPath(t *testing.T, prefix string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "gojaccl-jaccld-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(dir, fmt.Sprintf("%s-%d.sock", prefix, time.Now().UnixNano()))
 }
 
 func dialUntilReady(t *testing.T, socket string) *ipc.Client {

@@ -1,2 +1,4 @@
 github.com/ebitengine/purego v0.11.0-alpha.2.0.20260509185937-f8849c8c937f h1:4AaXVjZEc3ndFvbngaEYtkbnoohJD2ru6jy9GZVgVOk=
 github.com/ebitengine/purego v0.11.0-alpha.2.0.20260509185937-f8849c8c937f/go.mod h1:iIjxzd6CiRiOG0UyXP+V1+jWqUXVjPKLAI0mRfJZTmQ=
+github.com/tmc/apple v0.6.3 h1:5jF7U2j30SgzU8PSQ4JZD32HGtRINxXvvRCwTIb8r/s=
+github.com/tmc/apple v0.6.3/go.mod h1:yy3A4tLBZYBCTu5xG52ZdtaAfzpRdTsuH5sXZn3MjSs=

@@ -1,7 +1,9 @@
 # gojaccl
 
-gojaccl is a Go implementation sketch of JACCL, the MLX collective
-communication library for Apple RDMA over Thunderbolt.
+gojaccl is a Go implementation of the JACCL collective communication model for
+Apple RDMA over Thunderbolt. It provides a small Go API, a daemon-backed
+resource owner for macOS Thunderbolt RDMA, and operator proof packets for the
+hardware paths that require explicit physical validation.
 
 The public package is `jaccl`. It exposes a small synchronous API around a live
 communication group:
@@ -9,12 +11,31 @@ communication group:
 - `NewGroup` and `NewGroupFromEnv` initialize a rank.
 - `Barrier`, `Send`, and `Recv` provide control and byte-oriented point-to-point
   operations.
+- `NewSendWriter` and `NewRecvReader` expose point-to-point traffic as
+  `io.Writer` and `io.Reader` streams.
 - `AllSum`, `AllMax`, `AllMin`, and `AllGather` provide typed collectives over
   the supported `Element` types.
 
 The implementation keeps RDMA details internal. Callers pass ordinary Go
 slices; the backend copies through persistent mmap-backed staging buffers and
 does not register caller heap memory in the hot path.
+
+Streaming uses the standard library:
+
+```go
+w, err := g.NewSendWriter(ctx, 1)
+if err != nil {
+	return err
+}
+if _, err := io.Copy(w, file); err != nil {
+	_ = w.Close()
+	return err
+}
+return w.Close()
+```
+
+The receiving rank uses `NewRecvReader` and `io.Copy`. Use `bufio.NewReader`
+or `bufio.NewWriter` around the returned values when buffering is useful.
 
 `cmd/jaccld` is the daemon path for macOS Thunderbolt RDMA resource ownership.
 It keeps the device, protection domain, and global registered slab in one
@@ -56,11 +77,18 @@ distinct `JACCL_TEST_RANK` values, the same reachable
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
 
-A daemon rank is started with explicit rank metadata:
+The current hardware proof mode starts a static daemon rank with explicit rank
+metadata:
 
 ```sh
 jaccld -rank 0 -size 2 -coordinator 127.0.0.1:9000
 ```
+
+That is not the final once-per-boot production topology model. Production
+`jaccld` should start once per host boot with hardware and IPC options, then
+create topology sessions dynamically after startup. Until rank, size, and peer
+selection move out of startup, the daemon-backed physical claim remains limited
+to the accepted static two-host `rdma_en1` artifacts.
 
 The default production control plane uses loopback `tcpchan` addresses,
 normally through SSH local forwards between hosts. Non-loopback coordinators are
@@ -72,22 +100,51 @@ Before attempting a new hardware path, collect provider metadata without moving
 any queue pair to RTR:
 
 ```sh
+jacclctl rdma-metadata -device rdma_en1 -max-gids 1024
 jacclctl rdma-metadata -device rdma_en3 -max-gids 64
 ```
 
 This opens the device and queries port/GID metadata only. It does not allocate
 PDs, MRs, CQs, or QPs, and it does not post work requests.
 
+For the current post-reboot `rdma_en1` `errno 60` state, use the gated packet
+script instead of ad hoc commands:
+
+```sh
+REMOTE=<peer-ssh> \
+REMOTE_TMP=<peer-tmp-dir> \
+EXPECTED_SELECTED_GID_INDEX=<expected-gid-index> \
+  CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
+  scripts/rdma-en1-metadata-packet.sh
+```
+
+The script preserves a timestamped artifact under `~/tmp` and still does not
+authorize RTR. Its final evaluator only classifies metadata collection.
+
 An operator can trigger the explicit maintenance operation through the daemon
 socket:
 
 ```sh
-jacclctl -socket /tmp/jaccld.sock maintain
+jacclctl maintain -timeout 5s
 ```
+
+Operators can inspect daemon resource leases and jaccld-observed provider slot
+counters without touching RDMA hardware:
+
+```sh
+jacclctl stats
+```
+
+The slot ledger is scoped to the current OS boot and to resources allocated by
+`jaccld` itself. It reports protection-domain, memory-region, queue-pair, and
+completion-queue opens, close calls, failures, outstanding opens, and resources
+live in the current daemon process. It does not claim to see slots consumed by
+unrelated processes.
 
 Daemon-backed integration tests use the same `TestIntegrationChild` helper as
 the direct backend, with `JACCL_BACKEND=daemon` and `JACCL_DAEMON_SOCKET` set to
-the local daemon socket for each rank.
+the local daemon socket for each rank. Custom daemon socket paths must be placed
+in an owner-only directory.
 
 `-no-rdma` starts only the IPC server and slab allocator for hardware-free
 smoke tests.
@@ -102,18 +159,27 @@ The accepted production envelope is explicit same-data-QP maintenance, not a
 background heartbeat: two Apple Thunderbolt RDMA hosts, RDMA pinned to
 `rdma_en1`, admission stopped on all ranks, peer locks held, side-channel
 pre/post barriers, and fail-closed route poisoning on any provider, CQ, barrier,
-or maintenance error. This path has preserved long-idle proofs with 45/45
-maintenance rounds and passing pre/post daemon-backed barrier-sum using both
-SSH-forwarded loopback `tcpchan` and direct non-loopback `tcpchan` over the
-`rdma_en1` IP pair. RDMA_WRITE heartbeat production readiness, arbitrary rank
-counts, non-`rdma_en1` layouts, and arbitrary non-loopback deployments remain
-excluded until separately proven.
+or maintenance error. This path has preserved long-idle proofs with passing
+pre/post daemon-backed barrier-sum using both SSH-forwarded loopback `tcpchan`
+and direct non-loopback `tcpchan` over the `rdma_en1` IP pair. Current HEAD is
+not automatically physically proven by those artifacts. The last physically
+proven commit, `1c96ef3ea5dee212f19fd2a67d5ef53d943bdf76`, has an accepted
+2-hour soak: 120/120 maintenance rounds per rank, post-soak smoke passing,
+postflight `rdma_en1` active on both hosts, and cleanup clean.
+
+The proof artifacts are evidence for that exact deployment envelope and captured
+binary. Later commits that affect provider setup, transport behavior, daemon
+lifecycle, proof scripts, maintenance semantics, stream adapters, or workload
+proof surfaces require a fresh bounded `rdma_en1` proof before that exact binary
+can be called physically proven. RDMA_WRITE heartbeat production readiness,
+arbitrary rank counts, non-`rdma_en1` layouts, and arbitrary non-loopback
+deployments remain excluded until separately proven.
 
 ## Dependency
 
-This module currently uses a local `replace` for `github.com/tmc/apple` because
-the required generated RDMA binding surface is not in the published
-`github.com/tmc/apple` tags available in this workspace.
+This module depends on the released `github.com/tmc/apple` module. Local
+experiments may use an uncommitted workspace or command-line module override,
+but committed module metadata must stay portable.
 
 ## Documents
 
@@ -121,9 +187,12 @@ Design and validation artifacts live under `docs/`:
 
 - `docs/go-jaccl-spec.md`
 - `docs/go-package-files.md`
-- `docs/go-doc-output.txt`
-- `docs/go-test-output.txt`
 - `docs/jaccld.md`
+- `docs/jaccld-dynamic-topology.md`
 - `docs/jaccld-keepalive.md`
 - `docs/jaccld-data-qp-keepalive.md`
 - `docs/operator-runbook.md`
+
+Generated transcripts, timestamped proof packets, and local audit closeouts are
+kept out of git. Preserve those under the artifact directory for the specific
+run.
