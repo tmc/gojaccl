@@ -21,6 +21,8 @@ Implementation files:
 - `collective.go`: `Element`, `AllSum`, `AllMax`, `AllMin`, `AllGather`, slice
   length checks, and alias checks.
 - `p2p.go`: `Barrier`, `Send`, and `Recv`.
+- `stream.go`: `SendWriter` and `RecvReader` adapters for standard
+  `io.Reader` and `io.Writer` streaming over point-to-point traffic.
 - `backend.go`: unexported backend interface, backend selection, and the bridge
   from `Group` methods to internal transport packages.
 - `daemon_backend.go`: jaccld IPC client backend for barrier, point-to-point
@@ -40,6 +42,7 @@ Test and benchmark files:
 - `collective_test.go`: collective length, cancellation, zero-length,
   in-place, element-dispatch, and type-constraint tests.
 - `p2p_test.go`: `Barrier`, `Send`, and `Recv` tests.
+- `stream_test.go`: stream copy, partial-read, and error tests.
 - `errors_test.go`: error wrapping and error-context tests.
 - `fake_test.go`: in-memory backend used by public package tests.
 - `integration_test.go`: hardware integration tests. Safe discovery/failure

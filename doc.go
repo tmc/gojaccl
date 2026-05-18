@@ -23,7 +23,9 @@
 //
 // Collectives such as AllSum and AllGather are generic functions constrained
 // to supported Element types. Send and Recv move opaque byte slices for
-// point-to-point traffic.
+// point-to-point traffic. NewSendWriter and NewRecvReader adapt point-to-point
+// traffic to io.Writer and io.Reader for streaming use with packages such as
+// io and bufio.
 //
 // Collective functions validate slice lengths before posting RDMA work. AllSum,
 // AllMax, and AllMin require dst and src to have the same length. They support
@@ -39,7 +41,8 @@
 // opt into half-precision wire semantics.
 //
 // Collectives must be called in the same order on every rank. A single Group
-// permits at most one active collective or point-to-point operation at a time.
+// permits at most one active collective, point-to-point, or stream operation at
+// a time.
 //
 // The RDMA backend is darwin/arm64 using the purego github.com/tmc/apple/rdma
 // bindings. Other platforms report that RDMA is unavailable.
