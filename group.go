@@ -25,6 +25,10 @@ func NewGroup(ctx context.Context, cfg Config) (*Group, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, wrapError(cfg.Rank, "new group", err)
 	}
+	size, err := cfg.groupSize()
+	if err != nil {
+		return nil, wrapError(cfg.Rank, "new group", err)
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, wrapError(cfg.Rank, "new group", err)
 	}
@@ -34,7 +38,7 @@ func NewGroup(ctx context.Context, cfg Config) (*Group, error) {
 	}
 	return &Group{
 		rank:   cfg.Rank,
-		size:   len(cfg.Devices),
+		size:   size,
 		b:      b,
 		op:     make(chan struct{}, 1),
 		closed: make(chan struct{}),
@@ -86,20 +90,50 @@ func (g *Group) Close() error {
 }
 
 func (g *Group) do(ctx context.Context, op string, fn func(backend) error) error {
+	lease, err := g.begin(ctx, op)
+	if err != nil {
+		return err
+	}
+	defer lease.release()
+	return lease.do(fn)
+}
+
+type groupOperation struct {
+	g        *Group
+	name     string
+	released bool
+}
+
+func (g *Group) begin(ctx context.Context, op string) (*groupOperation, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if g == nil {
-		return wrapError(-1, op, ErrClosed)
+		return nil, wrapError(-1, op, ErrClosed)
 	}
 	if err := g.acquire(ctx); err != nil {
-		return wrapError(g.rank, op, err)
+		return nil, wrapError(g.rank, op, err)
 	}
-	defer g.release()
 	if g.b == nil {
-		return wrapError(g.rank, op, ErrClosed)
+		g.release()
+		return nil, wrapError(g.rank, op, ErrClosed)
 	}
-	return wrapError(g.rank, op, fn(g.b))
+	return &groupOperation{g: g, name: op}, nil
+}
+
+func (op *groupOperation) do(fn func(backend) error) error {
+	if op == nil || op.released || op.g == nil || op.g.b == nil {
+		return wrapError(-1, "operation", ErrClosed)
+	}
+	return wrapError(op.g.rank, op.name, fn(op.g.b))
+}
+
+func (op *groupOperation) release() {
+	if op == nil || op.released || op.g == nil {
+		return
+	}
+	op.released = true
+	op.g.release()
 }
 
 func (g *Group) acquire(ctx context.Context) error {

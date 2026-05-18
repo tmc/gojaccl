@@ -89,6 +89,45 @@ func TestStreamReadSmallBuffer(t *testing.T) {
 	}
 }
 
+func TestStreamHoldsGroupOperation(t *testing.T) {
+	t.Run("SendWriterUntilClose", func(t *testing.T) {
+		g := newBlockingGroup(newBlockingBackend())
+		w, err := g.NewSendWriter(context.Background(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		if err := g.Send(ctx, 1, nil); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Send while stream open = %v, want deadline", err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := g.Send(context.Background(), 1, nil); err != nil {
+			t.Fatalf("Send after stream close = %v", err)
+		}
+	})
+	t.Run("RecvReaderUntilEOF", func(t *testing.T) {
+		g := newBlockingGroup(newBlockingBackend())
+		r, err := g.NewRecvReader(context.Background(), 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+		defer cancel()
+		if err := g.Send(ctx, 1, nil); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Send while stream open = %v, want deadline", err)
+		}
+		if n, err := r.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+			t.Fatalf("Read = %d, %v; want 0, EOF", n, err)
+		}
+		if err := g.Send(context.Background(), 1, nil); err != nil {
+			t.Fatalf("Send after stream EOF = %v", err)
+		}
+	})
+}
+
 func TestStreamErrors(t *testing.T) {
 	t.Run("WriteAfterClose", func(t *testing.T) {
 		g := newFakeGroup(0, 2, newFakeNetwork(2))

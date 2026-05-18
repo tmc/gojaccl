@@ -12,10 +12,12 @@ selector. The supported type IDs are bool, signed and unsigned integers,
 float16, bfloat16, float32, float64, and complex64.
 
 Configuration can come from environment variables or an explicit `Config`.
-The environment variables are `JACCL_RANK` or `MLX_RANK`,
-`JACCL_IBV_DEVICES` or `MLX_IBV_DEVICES`, `JACCL_COORDINATOR` or
-`MLX_JACCL_COORDINATOR`, and optional `JACCL_RING` or `MLX_JACCL_RING`.
-The device file is a rank-by-rank JSON connectivity matrix.
+The direct backend uses `JACCL_RANK` or `MLX_RANK`, `JACCL_IBV_DEVICES` or
+`MLX_IBV_DEVICES`, `JACCL_COORDINATOR` or `MLX_JACCL_COORDINATOR`, and optional
+`JACCL_RING` or `MLX_JACCL_RING`. The daemon backend uses `JACCL_RANK`,
+`JACCL_SIZE`, `JACCL_BACKEND=daemon`, and `JACCL_DAEMON_SOCKET`; `MLX_RANK`,
+`MLX_WORLD_SIZE`, and `MLX_SIZE` are accepted fallbacks for rank and size. The
+device file is a rank-by-rank JSON connectivity matrix.
 
 The implementation chooses a ring group when ring is preferred and valid,
 otherwise a mesh group when mesh is valid, otherwise a ring group if only ring
@@ -51,8 +53,8 @@ payloads between ranks.
 
 The public package should not require cgo. Any Apple RDMA binding, dynamic
 library loading, or generated ABI surface belongs behind build tags and internal
-packages. The current RDMA backend is `darwin && arm64`; other platforms return
-`rdma unavailable` from the internal backend.
+packages. The current RDMA backend is `darwin && arm64`; other platforms build
+with stubs that return `rdma unavailable` from the internal backend.
 
 ## Package Shape
 
@@ -60,12 +62,13 @@ The package name should be `jaccl`.
 
 Public API:
 
-- `Config` describes rank, coordinator, device matrix, and whether ring should
-  be preferred when the matrix is valid for ring communication.
+- `Config` describes rank, group size, backend selection, daemon socket,
+  coordinator, device matrix, and whether ring should be preferred when the
+  matrix is valid for direct ring communication.
 - `Group` owns a live communicator and its internal RDMA resources.
 - `NewGroup` initializes the communicator from an explicit `Config`.
-- `NewGroupFromEnv` parses the same environment contract as the C++ library and
-  initializes a communicator.
+- `NewGroupFromEnv` parses the direct backend environment contract inherited
+  from MLX JACCL, plus Go-specific backend and daemon socket variables.
 - `Available` reports whether the platform backend can load and use RDMA.
 - `Rank() int` and `Size() int` report the local rank and group size.
 - `Close() error` releases registered memory, completion queues, queue pairs,
@@ -83,7 +86,9 @@ Internal packages:
 
 ## Public API
 
-Build constraint: `//go:build darwin && arm64`.
+The public package builds on all supported Go platforms. The RDMA backend is
+available only on `darwin && arm64`; unsupported platforms report that RDMA is
+unavailable.
 
 Package declaration: `package jaccl`.
 
@@ -93,9 +98,12 @@ Public configuration type:
 
 - `type Config struct`
 - `Rank int`
+- `Size int`
 - `Coordinator string`
 - `Devices [][][]string`
 - `PreferRing bool`
+- `Backend string`
+- `DaemonSocket string`
 
 Public package functions:
 
@@ -112,6 +120,8 @@ Public group type and methods:
 - `func (g *Group) Barrier(ctx context.Context) error`
 - `func (g *Group) Send(ctx context.Context, dst int, src []byte) error`
 - `func (g *Group) Recv(ctx context.Context, src int, dst []byte) error`
+- `func (g *Group) NewSendWriter(ctx context.Context, dst int) (*SendWriter, error)`
+- `func (g *Group) NewRecvReader(ctx context.Context, src int) (*RecvReader, error)`
 - `func (g *Group) Close() error`
 
 Public type constraints:
@@ -183,9 +193,15 @@ match the C++ JACCL backend's dtype semantics, including its bool and complex64
 handling, or explicitly reject a dtype before posting work.
 
 Collective calls on a group must occur in the same order on every rank. A
-single `Group` permits at most one active collective or point-to-point operation
-at a time; implementations must serialize local access or return a clear
-busy-state error before touching shared staging buffers.
+single `Group` permits at most one active collective, point-to-point operation,
+or stream at a time; implementations must serialize local access or return a
+clear busy-state error before touching shared staging buffers. Stream adapters
+hold the group operation from construction until `Close` or received EOF so
+stream frames cannot interleave with another operation.
+
+Zero-length collectives are local no-payload operations, but they still enter
+the group operation path. A closed group or canceled context must be reported
+even when the source slice is empty.
 
 ## Testing And Validation
 

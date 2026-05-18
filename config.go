@@ -26,6 +26,9 @@ const (
 type Config struct {
 	// Rank is this process's zero-based rank.
 	Rank int
+	// Size is the number of ranks. It is required for the daemon backend when
+	// Devices is empty.
+	Size int
 	// Coordinator is the rank-zero TCP side-channel address, host:port.
 	Coordinator string
 	// Devices is indexed as [src][dst][wire] and names RDMA device paths.
@@ -52,29 +55,6 @@ func ConfigFromEnv() (Config, error) {
 	}
 	cfg.Rank = rank
 
-	coord, ok := getenv("JACCL_COORDINATOR", "MLX_JACCL_COORDINATOR")
-	if !ok {
-		return Config{}, fmt.Errorf("coordinator: missing JACCL_COORDINATOR or MLX_JACCL_COORDINATOR")
-	}
-	cfg.Coordinator = coord
-
-	path, ok := getenv("JACCL_IBV_DEVICES", "MLX_IBV_DEVICES")
-	if !ok {
-		return Config{}, fmt.Errorf("devices: missing JACCL_IBV_DEVICES or MLX_IBV_DEVICES")
-	}
-	devices, err := readDeviceMatrix(path)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.Devices = devices
-
-	if ring, ok := getenv("JACCL_RING", "MLX_JACCL_RING"); ok {
-		prefer, err := parseBool(ring)
-		if err != nil {
-			return Config{}, fmt.Errorf("ring: parse %q: %w", ring, err)
-		}
-		cfg.PreferRing = prefer
-	}
 	if backend, ok := os.LookupEnv("JACCL_BACKEND"); ok {
 		cfg.Backend = backend
 	}
@@ -83,6 +63,30 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if cfg.DaemonSocket == "" && cfg.backendMode() == BackendDaemon {
 		cfg.DaemonSocket = ipc.DefaultSocket
+	}
+	if sizeText, ok := getenvAny("JACCL_SIZE", "MLX_WORLD_SIZE", "MLX_SIZE"); ok {
+		size, err := strconv.Atoi(sizeText)
+		if err != nil {
+			return Config{}, fmt.Errorf("size: parse %q: %w", sizeText, err)
+		}
+		cfg.Size = size
+	}
+	if coord, ok := getenv("JACCL_COORDINATOR", "MLX_JACCL_COORDINATOR"); ok {
+		cfg.Coordinator = coord
+	}
+	if path, ok := getenv("JACCL_IBV_DEVICES", "MLX_IBV_DEVICES"); ok {
+		devices, err := readDeviceMatrix(path)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.Devices = devices
+	}
+	if ring, ok := getenv("JACCL_RING", "MLX_JACCL_RING"); ok {
+		prefer, err := parseBool(ring)
+		if err != nil {
+			return Config{}, fmt.Errorf("ring: parse %q: %w", ring, err)
+		}
+		cfg.PreferRing = prefer
 	}
 
 	if err := cfg.validate(); err != nil {
@@ -95,11 +99,25 @@ func (c Config) validate() error {
 	if c.Rank < 0 {
 		return fmt.Errorf("rank %d out of range", c.Rank)
 	}
+	switch c.backendMode() {
+	case BackendAuto, BackendDirect:
+		return c.validateDirect()
+	case BackendDaemon:
+		return c.validateDaemon()
+	default:
+		return fmt.Errorf("backend %q is invalid", c.Backend)
+	}
+}
+
+func (c Config) validateDirect() error {
 	if strings.TrimSpace(c.Coordinator) == "" {
 		return fmt.Errorf("coordinator is empty")
 	}
 	if err := topology.ValidateDeviceMatrix(c.Devices); err != nil {
 		return err
+	}
+	if c.Size > 0 && c.Size != len(c.Devices) {
+		return fmt.Errorf("size %d does not match device matrix size %d", c.Size, len(c.Devices))
 	}
 	if c.Rank >= len(c.Devices) {
 		return fmt.Errorf("rank %d out of range for size %d", c.Rank, len(c.Devices))
@@ -107,12 +125,34 @@ func (c Config) validate() error {
 	if _, err := topology.Choose(c.Devices, c.PreferRing); err != nil {
 		return err
 	}
-	switch c.backendMode() {
-	case BackendAuto, BackendDirect, BackendDaemon:
-	default:
-		return fmt.Errorf("backend %q is invalid", c.Backend)
+	return nil
+}
+
+func (c Config) validateDaemon() error {
+	size, err := c.groupSize()
+	if err != nil {
+		return err
+	}
+	if c.Rank >= size {
+		return fmt.Errorf("rank %d out of range for size %d", c.Rank, size)
 	}
 	return nil
+}
+
+func (c Config) groupSize() (int, error) {
+	if len(c.Devices) > 0 {
+		if err := topology.ValidateDeviceMatrix(c.Devices); err != nil {
+			return 0, err
+		}
+		if c.Size > 0 && c.Size != len(c.Devices) {
+			return 0, fmt.Errorf("size %d does not match device matrix size %d", c.Size, len(c.Devices))
+		}
+		return len(c.Devices), nil
+	}
+	if c.Size <= 0 {
+		return 0, fmt.Errorf("size %d is not positive", c.Size)
+	}
+	return c.Size, nil
 }
 
 func (c Config) backendMode() string {
@@ -152,6 +192,15 @@ func getenv(primary, fallback string) (string, bool) {
 		return v, true
 	}
 	return os.LookupEnv(fallback)
+}
+
+func getenvAny(names ...string) (string, bool) {
+	for _, name := range names {
+		if v, ok := os.LookupEnv(name); ok {
+			return v, true
+		}
+	}
+	return "", false
 }
 
 func parseBool(s string) (bool, error) {

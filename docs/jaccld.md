@@ -8,7 +8,9 @@ Use of the daemon backend is explicit. `Config.Backend` accepts `auto`,
 `direct`, and `daemon`; empty means `auto`. `auto` uses the working direct
 backend today. `daemon` uses the jaccld IPC client for barrier and
 point-to-point operations. Daemon-backed collectives use asynchronous IPC work
-when the daemon transport supports collective work.
+when the daemon transport supports collective work. Daemon clients need only
+rank, size, and the daemon socket; they do not need the direct-backend
+coordinator or RDMA device matrix.
 
 ## Constraints
 

@@ -54,6 +54,30 @@ func TestDaemonBackendP2P(t *testing.T) {
 	}
 }
 
+func TestDaemonBackendDoesNotRequireDirectTopology(t *testing.T) {
+	tr := &daemonTransport{}
+	slab, socket, cleanup := startDaemonBackendServer(t, tr)
+	defer cleanup()
+	tr.setSlab(slab)
+
+	g, err := NewGroup(context.Background(), Config{
+		Rank:         0,
+		Size:         2,
+		Backend:      BackendDaemon,
+		DaemonSocket: socket,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer g.Close()
+	if g.Size() != 2 {
+		t.Fatalf("Size = %d, want 2", g.Size())
+	}
+	if err := g.Barrier(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDaemonBackendCollectives(t *testing.T) {
 	reduceWant := []int64{3}
 	gatherWant := []int64{1, 2}

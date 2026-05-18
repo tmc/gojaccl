@@ -16,6 +16,7 @@ const DefaultStreamChunkSize = 1 << 20
 type SendWriter struct {
 	g      *Group
 	ctx    context.Context
+	op     *groupOperation
 	dst    int
 	chunk  int
 	closed bool
@@ -25,6 +26,7 @@ type SendWriter struct {
 type RecvReader struct {
 	g       *Group
 	ctx     context.Context
+	op      *groupOperation
 	src     int
 	max     int
 	pending []byte
@@ -54,7 +56,11 @@ func newSendWriter(ctx context.Context, g *Group, dst, chunk int) (*SendWriter, 
 	if chunk <= 0 {
 		return nil, wrapError(g.rank, "new send writer", fmt.Errorf("chunk size %d is not positive", chunk))
 	}
-	return &SendWriter{g: g, ctx: ctx, dst: dst, chunk: chunk}, nil
+	op, err := g.begin(ctx, "stream send")
+	if err != nil {
+		return nil, err
+	}
+	return &SendWriter{g: g, ctx: ctx, op: op, dst: dst, chunk: chunk}, nil
 }
 
 // Write sends p to the peer.
@@ -68,7 +74,7 @@ func (w *SendWriter) Write(p []byte) (int, error) {
 	written := 0
 	for written < len(p) {
 		n := min(w.chunk, len(p)-written)
-		if err := w.g.sendStreamFrame(w.ctx, w.dst, p[written:written+n]); err != nil {
+		if err := w.sendFrame(p[written : written+n]); err != nil {
 			return written, err
 		}
 		written += n
@@ -111,7 +117,8 @@ func (w *SendWriter) Close() error {
 		return nil
 	}
 	w.closed = true
-	return w.g.sendStreamFrame(w.ctx, w.dst, nil)
+	defer w.op.release()
+	return w.sendFrame(nil)
 }
 
 // NewRecvReader returns a reader that receives bytes from src.
@@ -129,7 +136,11 @@ func newRecvReader(ctx context.Context, g *Group, src, max int) (*RecvReader, er
 	if max <= 0 {
 		return nil, wrapError(g.rank, "new recv reader", fmt.Errorf("frame size %d is not positive", max))
 	}
-	return &RecvReader{g: g, ctx: ctx, src: src, max: max}, nil
+	op, err := g.begin(ctx, "stream recv")
+	if err != nil {
+		return nil, err
+	}
+	return &RecvReader{g: g, ctx: ctx, op: op, src: src, max: max}, nil
 }
 
 // Read receives bytes from the peer.
@@ -146,12 +157,13 @@ func (r *RecvReader) Read(p []byte) (int, error) {
 	if r.eof {
 		return 0, io.EOF
 	}
-	frame, err := r.g.recvStreamFrame(r.ctx, r.src, r.max)
+	frame, err := r.recvFrame()
 	if err != nil {
 		return 0, err
 	}
 	if frame == nil {
 		r.eof = true
+		r.op.release()
 		return 0, io.EOF
 	}
 	n := copy(p, frame)
@@ -176,12 +188,13 @@ func (r *RecvReader) WriteTo(w io.Writer) (int64, error) {
 		}
 	}
 	for !r.eof {
-		frame, err := r.g.recvStreamFrame(r.ctx, r.src, r.max)
+		frame, err := r.recvFrame()
 		if err != nil {
 			return total, err
 		}
 		if frame == nil {
 			r.eof = true
+			r.op.release()
 			return total, nil
 		}
 		n, err := writeAll(w, frame)
@@ -200,6 +213,7 @@ func (r *RecvReader) Close() error {
 	}
 	r.closed = true
 	r.pending = nil
+	r.op.release()
 	return nil
 }
 
@@ -212,42 +226,36 @@ func (r *RecvReader) readPending(p []byte) int {
 	return n
 }
 
-func (g *Group) sendStreamFrame(ctx context.Context, dst int, payload []byte) error {
-	if err := g.checkRank("stream send", dst); err != nil {
-		return err
-	}
+func (w *SendWriter) sendFrame(payload []byte) error {
 	var header [8]byte
 	binary.BigEndian.PutUint64(header[:], uint64(len(payload)))
-	return g.do(ctx, "stream send", func(b backend) error {
-		if err := b.send(ctx, dst, header[:]); err != nil {
+	return w.op.do(func(b backend) error {
+		if err := b.send(w.ctx, w.dst, header[:]); err != nil {
 			return err
 		}
 		if len(payload) == 0 {
 			return nil
 		}
-		return b.send(ctx, dst, payload)
+		return b.send(w.ctx, w.dst, payload)
 	})
 }
 
-func (g *Group) recvStreamFrame(ctx context.Context, src, max int) ([]byte, error) {
-	if err := g.checkRank("stream recv", src); err != nil {
-		return nil, err
-	}
+func (r *RecvReader) recvFrame() ([]byte, error) {
 	var frame []byte
 	var header [8]byte
-	err := g.do(ctx, "stream recv", func(b backend) error {
-		if err := b.recv(ctx, src, header[:]); err != nil {
+	err := r.op.do(func(b backend) error {
+		if err := b.recv(r.ctx, r.src, header[:]); err != nil {
 			return err
 		}
 		n := binary.BigEndian.Uint64(header[:])
 		if n == 0 {
 			return nil
 		}
-		if n > uint64(max) {
-			return fmt.Errorf("stream frame length %d exceeds limit %d", n, max)
+		if n > uint64(r.max) {
+			return fmt.Errorf("stream frame length %d exceeds limit %d", n, r.max)
 		}
 		frame = make([]byte, int(n))
-		return b.recv(ctx, src, frame)
+		return b.recv(r.ctx, r.src, frame)
 	})
 	if err != nil {
 		return nil, err

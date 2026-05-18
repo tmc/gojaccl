@@ -75,7 +75,7 @@ func TestCollectiveLengthValidation(t *testing.T) {
 		}
 	})
 	t.Run("NilSlicesAllowedWhenLengthsMatch", func(t *testing.T) {
-		g := newFakeGroup(0, 2, newFakeNetwork(2))
+		g := newFakeGroup(0, 1, newFakeNetwork(1))
 		if err := AllSum[int32](context.Background(), g, nil, nil); err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestCollectiveContextCancellation(t *testing.T) {
 }
 
 func TestCollectiveZeroLength(t *testing.T) {
-	g := newFakeGroup(0, 2, newFakeNetwork(2))
+	g := newFakeGroup(0, 1, newFakeNetwork(1))
 	t.Run("AllSum", func(t *testing.T) {
 		if err := AllSum[int32](context.Background(), g, nil, nil); err != nil {
 			t.Fatal(err)
@@ -127,6 +127,32 @@ func TestCollectiveZeroLength(t *testing.T) {
 	t.Run("AllGather", func(t *testing.T) {
 		if err := AllGather[int32](context.Background(), g, nil, nil); err != nil {
 			t.Fatal(err)
+		}
+	})
+}
+
+func TestCollectiveZeroLengthUsesGroupState(t *testing.T) {
+	t.Run("ClosedGroup", func(t *testing.T) {
+		g := newFakeGroup(0, 2, newFakeNetwork(2))
+		if err := g.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := AllSum[int32](context.Background(), g, nil, nil); !errors.Is(err, ErrClosed) {
+			t.Fatalf("AllSum closed = %v, want ErrClosed", err)
+		}
+		if err := AllGather[int32](context.Background(), g, nil, nil); !errors.Is(err, ErrClosed) {
+			t.Fatalf("AllGather closed = %v, want ErrClosed", err)
+		}
+	})
+	t.Run("CanceledContext", func(t *testing.T) {
+		g := newFakeGroup(0, 2, newFakeNetwork(2))
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if err := AllSum[int32](ctx, g, nil, nil); !errors.Is(err, context.Canceled) {
+			t.Fatalf("AllSum canceled = %v, want context.Canceled", err)
+		}
+		if err := AllGather[int32](ctx, g, nil, nil); !errors.Is(err, context.Canceled) {
+			t.Fatalf("AllGather canceled = %v, want context.Canceled", err)
 		}
 	})
 }

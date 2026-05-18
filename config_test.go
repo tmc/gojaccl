@@ -148,6 +148,33 @@ func TestConfigFromEnv(t *testing.T) {
 			t.Fatalf("DaemonSocket = %q, want default", cfg.DaemonSocket)
 		}
 	})
+	t.Run("DaemonBackendWithoutDirectTopology", func(t *testing.T) {
+		t.Setenv("JACCL_RANK", "1")
+		t.Setenv("JACCL_SIZE", "2")
+		t.Setenv("JACCL_BACKEND", BackendDaemon)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Rank != 1 || cfg.Size != 2 || len(cfg.Devices) != 0 || cfg.Coordinator != "" {
+			t.Fatalf("daemon config = %+v", cfg)
+		}
+		if cfg.DaemonSocket != ipc.DefaultSocket {
+			t.Fatalf("DaemonSocket = %q, want default", cfg.DaemonSocket)
+		}
+	})
+	t.Run("DaemonBackendMLXSizeFallback", func(t *testing.T) {
+		t.Setenv("JACCL_RANK", "0")
+		t.Setenv("MLX_WORLD_SIZE", "3")
+		t.Setenv("JACCL_BACKEND", BackendDaemon)
+		cfg, err := ConfigFromEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.Size != 3 {
+			t.Fatalf("Size = %d, want 3", cfg.Size)
+		}
+	})
 	t.Run("NoMLXBackendFallback", func(t *testing.T) {
 		path := writeDevices(t, fakeConfig(0, 2).Devices)
 		t.Setenv("MLX_RANK", "0")
@@ -238,6 +265,31 @@ func TestConfigValidate(t *testing.T) {
 		cfg.Backend = "magic"
 		if err := cfg.validate(); err == nil {
 			t.Fatal("validate invalid backend = nil")
+		}
+	})
+	t.Run("DaemonSizeOnly", func(t *testing.T) {
+		cfg := Config{Rank: 1, Size: 2, Backend: BackendDaemon}
+		if err := cfg.validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("DaemonSizeRequiredWithoutDevices", func(t *testing.T) {
+		cfg := Config{Rank: 0, Backend: BackendDaemon}
+		if err := cfg.validate(); err == nil {
+			t.Fatal("validate daemon without size = nil")
+		}
+	})
+	t.Run("DaemonRankOutOfBoundsForSize", func(t *testing.T) {
+		cfg := Config{Rank: 2, Size: 2, Backend: BackendDaemon}
+		if err := cfg.validate(); err == nil {
+			t.Fatal("validate daemon rank out of bounds = nil")
+		}
+	})
+	t.Run("SizeMismatch", func(t *testing.T) {
+		cfg := fakeConfig(0, 2)
+		cfg.Size = 3
+		if err := cfg.validate(); err == nil {
+			t.Fatal("validate size mismatch = nil")
 		}
 	})
 	t.Run("BackendModes", func(t *testing.T) {

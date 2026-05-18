@@ -42,9 +42,6 @@ func AllGather[T Element](ctx context.Context, g *Group, dst, src []T) error {
 	if slicesOverlap(dst, src) {
 		return wrapError(g.Rank(), "all gather", fmt.Errorf("source and destination overlap"))
 	}
-	if len(src) == 0 {
-		return nil
-	}
 	return g.do(ctx, "all gather", func(b backend) error {
 		return b.allGather(ctx, elementSize[T](), sliceBytes(dst), sliceBytes(src))
 	})
@@ -56,9 +53,6 @@ func allReduce[T Element](ctx context.Context, g *Group, name string, op reducti
 	}
 	if len(dst) != len(src) {
 		return wrapError(g.Rank(), name, fmt.Errorf("destination length %d, want %d", len(dst), len(src)))
-	}
-	if len(src) == 0 {
-		return nil
 	}
 	dt, err := reduce.DTypeFor[T]()
 	if err != nil {

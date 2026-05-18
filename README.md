@@ -50,6 +50,8 @@ not a background keepalive.
 Backend selection is explicit. Empty or `auto` uses the current direct backend;
 `direct` selects it intentionally. `daemon` selects the IPC client backend for
 barrier, point-to-point operations, and daemon-supported collectives.
+Daemon clients can be configured with only rank, size, and daemon socket; they
+do not need the direct backend coordinator or RDMA device matrix.
 
 ## Status
 
