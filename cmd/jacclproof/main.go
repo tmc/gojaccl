@@ -42,12 +42,16 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return exitError{code: 2, err: fmt.Errorf("missing command")}
 	}
 	switch args[0] {
+	case "devices":
+		return runDevicesCommand(args[1:], stdout, stderr)
 	case "process-snapshot":
 		return runProcessSnapshot(args[1:], stdout)
 	case "rdma-metadata":
 		return runRDMAMetadataPacket(args[1:], stdout, stderr)
 	case "rdma-soak":
 		return runRDMASoakPacket(args[1:], stdout, stderr)
+	case "topology":
+		return runTopologyCommand(args[1:], stdout, stderr)
 	default:
 		usage(stderr)
 		return exitError{code: 2, err: fmt.Errorf("unknown command %q", args[0])}
@@ -55,9 +59,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 }
 
 func usage(w io.Writer) {
-	fmt.Fprintln(w, "usage: jacclproof process-snapshot")
+	fmt.Fprintln(w, "usage: jacclproof devices [-ranks n] [-shape mesh|ring|line] [-devices rdma_en1,rdma_en3]")
+	fmt.Fprintln(w, "       jacclproof process-snapshot")
 	fmt.Fprintln(w, "       jacclproof rdma-metadata -device rdma_en1|rdma_en3 -remote user@host -remote-tmp dir")
 	fmt.Fprintln(w, "       jacclproof rdma-soak -device rdma_en1")
+	fmt.Fprintln(w, "       jacclproof topology -file devices.json")
 }
 
 func runProcessSnapshot(args []string, stdout io.Writer) error {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tmc/gojaccl/internal/rdma"
+	"github.com/tmc/gojaccl/internal/topology"
 )
 
 func requireRDMA(t *testing.T) string {
@@ -56,7 +57,12 @@ func TestIntegrationChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	summary, err := topology.Summarize(cfg.Devices, cfg.PreferRing)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fmt.Fprintf(os.Stderr, "rank %d: new group op=%s device=%s devices=%s coordinator=%s backend=%s socket=%s\n", rank, op, device, integrationDeviceMatrixPath(), coordinator, backend, socket)
+	fmt.Fprintf(os.Stderr, "rank %d: topology=%s ranks=%d directed_edges=%d empty_edges=%d total_wires=%d max_wires=%d matrix_sha256=%s\n", rank, summary.Topology, summary.Ranks, summary.DirectedEdges, summary.EmptyEdges, summary.TotalWires, summary.MaxWires, summary.MatrixSHA256)
 	g, err := NewGroup(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -221,12 +227,19 @@ func TestIntegrationConfigDeviceMatrixEnv(t *testing.T) {
 }
 
 func TestIntegrationConfigSingleDeviceExpandsCompleteMatrix(t *testing.T) {
-	cfg, err := integrationConfig(0, 3, "rdma_en1", "127.0.0.1:1", true)
+	cfg, err := integrationConfig(0, 2, "rdma_en1", "127.0.0.1:1", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Devices) != 3 || cfg.Devices[0][2][0] != "rdma_en1" {
+	if len(cfg.Devices) != 2 || cfg.Devices[0][1][0] != "rdma_en1" {
 		t.Fatalf("integrationConfig devices = %+v", cfg.Devices)
+	}
+}
+
+func TestIntegrationConfigRejectsLargeSingleDeviceShorthand(t *testing.T) {
+	_, err := integrationConfig(0, 3, "rdma_en1", "127.0.0.1:1", true)
+	if err == nil || !strings.Contains(err.Error(), "single-device RDMA shorthand expands to a complete mesh") {
+		t.Fatalf("integrationConfig = %v, want single-device shorthand error", err)
 	}
 }
 
@@ -308,6 +321,9 @@ func integrationConfig(rank, size int, device, coordinator string, preferRing bo
 			Backend:      os.Getenv("JACCL_BACKEND"),
 			DaemonSocket: os.Getenv("JACCL_DAEMON_SOCKET"),
 		}, nil
+	}
+	if size > 2 && device != "" {
+		return Config{}, fmt.Errorf("single-device RDMA shorthand expands to a complete mesh for size %d; use JACCL_TEST_RDMA_DEVICES for explicit multi-rank topology", size)
 	}
 	devices := make([][][]string, size)
 	for i := range devices {

@@ -1,6 +1,9 @@
 package topology
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateDeviceMatrix(t *testing.T) {
 	t.Run("TwoRankSquare", func(t *testing.T) {
@@ -168,6 +171,48 @@ func TestValidateLine(t *testing.T) {
 			t.Fatal("ValidateLine(uneven wires) = nil")
 		}
 	})
+}
+
+func TestSummarizeLine(t *testing.T) {
+	s, err := Summarize(line(3), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Topology != Line {
+		t.Fatalf("Topology = %v, want line", s.Topology)
+	}
+	if s.Ranks != 3 || s.DirectedEdges != 4 || s.EmptyEdges != 2 || s.TotalWires != 4 || s.MaxWires != 1 {
+		t.Fatalf("Summary = %+v", s)
+	}
+	if len(s.MatrixSHA256) != 64 {
+		t.Fatalf("MatrixSHA256 = %q, want 64 hex chars", s.MatrixSHA256)
+	}
+	if got, want := strings.Join(s.Devices, ","), "dev"; got != want {
+		t.Fatalf("Devices = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(s.PrimaryDevices, ","), "dev"; got != want {
+		t.Fatalf("PrimaryDevices = %q, want %q", got, want)
+	}
+}
+
+func TestSummarizeReportsAllAndPrimaryDevices(t *testing.T) {
+	matrix := [][][]string{
+		{{}, {" rdma_en1 ", "rdma_en3"}},
+		{{"rdma_en3", "rdma_en1"}, {}},
+	}
+	s, err := Summarize(matrix, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(s.Devices, ","), "rdma_en1,rdma_en3"; got != want {
+		t.Fatalf("Devices = %q, want %q", got, want)
+	}
+	if got, want := strings.Join(s.PrimaryDevices, ","), "rdma_en1,rdma_en3"; got != want {
+		t.Fatalf("PrimaryDevices = %q, want %q", got, want)
+	}
+	if s.TotalWires != 4 || s.MaxWires != 2 {
+		t.Fatalf("wire counts = %d/%d, want 4/2", s.TotalWires, s.MaxWires)
+	}
 }
 
 func TestValidateConnected(t *testing.T) {

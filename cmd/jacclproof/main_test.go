@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -90,6 +91,81 @@ func TestProofCommandsRefuseWithoutConfirmation(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestTopologyCommandReportsSparseLine(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "devices.json")
+	if err := os.WriteFile(file, []byte(`[
+		[[], ["left"], []],
+		[["left"], [], ["right"]],
+		[[], ["right"], []]
+	]`), 0666); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"topology", "-file", file, "-prefer-ring"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		`"topology": "line"`,
+		`"ranks": 3`,
+		`"directed_edges": 4`,
+		`"empty_edges": 2`,
+		`"total_wires": 4`,
+		`"devices": [`,
+		`"primary_devices": [`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stdout missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestDevicesCommandWritesTwoRankDualCableMatrix(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{"devices", "-ranks", "2", "-devices", "rdma_en1,rdma_en3"}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var matrix [][][]string
+	if err := json.Unmarshal(stdout.Bytes(), &matrix); err != nil {
+		t.Fatal(err)
+	}
+	if len(matrix) != 2 || len(matrix[0][1]) != 2 || matrix[0][1][0] != "rdma_en1" || matrix[0][1][1] != "rdma_en3" {
+		t.Fatalf("matrix = %#v, want two-rank dual-cable matrix", matrix)
+	}
+	if len(matrix[1][0]) != 2 || matrix[1][0][0] != "rdma_en1" || matrix[1][0][1] != "rdma_en3" {
+		t.Fatalf("matrix = %#v, want symmetric dual-cable matrix", matrix)
+	}
+}
+
+func TestDevicesCommandRejectsBadShape(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"devices", "-shape", "star"}, &stdout, &stderr)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit code = %d err=%v, want 2", code, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), `unknown shape "star"`) {
+		t.Fatalf("error = %v, want bad shape", err)
+	}
+}
+
+func TestTopologyCommandRejectsMissingFile(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"topology"}, &stdout, &stderr)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit code = %d err=%v, want 2", code, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "file is required") {
+		t.Fatalf("error = %v, want file required", err)
 	}
 }
 

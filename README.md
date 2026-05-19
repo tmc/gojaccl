@@ -77,10 +77,21 @@ To run a physical test, start one `TestIntegrationChild` process per host with
 The canonical topology input is an explicit JSON device matrix in
 `JACCL_TEST_RDMA_DEVICES`. That matrix may describe a complete mesh, or a sparse
 connected topology supported by the backend. The legacy single-device shorthand
-`JACCL_TEST_RDMA_DEVICE` expands to a complete matrix for the requested size; use
-`JACCL_TEST_RDMA_DEVICES` when ranks do not all have direct peer links. A sparse
-three-host line should leave the endpoint-to-endpoint entries empty in the
-matrix; no additional topology flag is required.
+`JACCL_TEST_RDMA_DEVICE` is accepted only for two-rank integration helpers,
+because it expands to a complete matrix. Use `JACCL_TEST_RDMA_DEVICES` for every
+three-or-more-rank attempt. A sparse three-host line should leave the
+endpoint-to-endpoint entries empty in the matrix; no additional topology flag is
+required.
+
+Before any physical three-or-more-rank attempt, validate the matrix offline:
+
+```sh
+go run ./cmd/jacclproof topology -file devices.json
+```
+
+This prints selected topology, rank count, directed and empty edge counts, wire
+counts, and the matrix SHA-256. It does not open RDMA devices, start a
+coordinator, allocate queue pairs, or authorize RTR.
 
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
