@@ -43,12 +43,12 @@ func TestRunMaintainCommandValidation(t *testing.T) {
 }
 
 func TestRunMaintainCommandTimesOut(t *testing.T) {
-	dir, err := os.MkdirTemp("/tmp", "jacclctl-maintain-*")
+	dir, err := os.MkdirTemp("", "gjctl-")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	socket := filepath.Join(dir, "jaccld.sock")
+	socket := filepath.Join(dir, "s.sock")
 	ln, err := net.Listen("unix", socket)
 	if err != nil {
 		t.Fatal(err)

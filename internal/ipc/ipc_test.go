@@ -613,7 +613,7 @@ func startTestServerWithTransport(t *testing.T, size int64, transport Transport)
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(secureSocketDir(t), fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	socket := filepath.Join(secureSocketDir(t), "s.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
@@ -655,7 +655,7 @@ func startTestServerWithResourceStore(t *testing.T, size int64, transport Transp
 	if err != nil {
 		t.Fatal(err)
 	}
-	socket := filepath.Join(secureSocketDir(t), fmt.Sprintf("jaccld-%d-%d.sock", os.Getpid(), time.Now().UnixNano()))
+	socket := filepath.Join(secureSocketDir(t), "s.sock")
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() {
@@ -687,7 +687,7 @@ func startTestServerWithResourceStore(t *testing.T, size int64, transport Transp
 
 func secureSocketDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "gojaccl-ipc-")
+	dir, err := os.MkdirTemp("", "gji-")
 	if err != nil {
 		t.Fatal(err)
 	}

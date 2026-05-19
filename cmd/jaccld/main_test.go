@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,7 +225,7 @@ func TestRunControlPlaneLivenessUpdatesSession(t *testing.T) {
 
 func testSocketPath(t *testing.T, prefix string) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "gojaccl-jaccld-")
+	dir, err := os.MkdirTemp("", "gjd-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,7 +235,7 @@ func testSocketPath(t *testing.T, prefix string) string {
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	return filepath.Join(dir, fmt.Sprintf("%s-%d.sock", prefix, time.Now().UnixNano()))
+	return filepath.Join(dir, prefix+".sock")
 }
 
 func dialUntilReady(t *testing.T, socket string) *ipc.Client {
