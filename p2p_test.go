@@ -120,18 +120,37 @@ func TestSendRecv(t *testing.T) {
 	})
 	t.Run("RingRejectsNonNeighborSend", func(t *testing.T) {
 		net := newFakeNetwork(4)
-		g := newFakeGroup(0, 4, net)
-		g.b.(*fakeBackend).ring = true
+		g := newFakeTopologyGroup(0, fakeRingMatrix(4), net, true)
 		if err := g.Send(context.Background(), 2, nil); err == nil {
 			t.Fatal("ring Send to non-neighbor = nil")
 		}
 	})
 	t.Run("RingRejectsNonNeighborRecv", func(t *testing.T) {
 		net := newFakeNetwork(4)
-		g := newFakeGroup(0, 4, net)
-		g.b.(*fakeBackend).ring = true
+		g := newFakeTopologyGroup(0, fakeRingMatrix(4), net, true)
 		if err := g.Recv(context.Background(), 2, nil); err == nil {
 			t.Fatal("ring Recv from non-neighbor = nil")
+		}
+	})
+	t.Run("LineRejectsEndpointToEndpointSend", func(t *testing.T) {
+		net := newFakeNetwork(3)
+		g := newFakeTopologyGroup(0, lineDeviceMatrix("left", "right"), net, true)
+		if err := g.Send(context.Background(), 2, nil); err == nil {
+			t.Fatal("line Send endpoint to endpoint = nil")
+		}
+	})
+	t.Run("LineRejectsEndpointToEndpointRecv", func(t *testing.T) {
+		net := newFakeNetwork(3)
+		g := newFakeTopologyGroup(2, lineDeviceMatrix("left", "right"), net, true)
+		if err := g.Recv(context.Background(), 0, nil); err == nil {
+			t.Fatal("line Recv endpoint from endpoint = nil")
+		}
+	})
+	t.Run("ConnectedRejectsMissingDirectSend", func(t *testing.T) {
+		net := newFakeNetwork(4)
+		g := newFakeTopologyGroup(0, fakePartialMatrix(), net, true)
+		if err := g.Send(context.Background(), 3, nil); err == nil {
+			t.Fatal("connected Send over missing direct edge = nil")
 		}
 	})
 }

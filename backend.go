@@ -251,8 +251,8 @@ func (b *rdmaBackend) allReduce(ctx context.Context, op reductionOp, dt reduce.D
 	if len(src) == 0 {
 		return nil
 	}
-	if b.topo == topology.Ring && b.size > 2 {
-		return b.ringAllReduce(ctx, op, dt, dst, src)
+	if b.topo != topology.Mesh {
+		return b.graphAllReduce(ctx, op, dt, dst, src)
 	}
 	recvs, err := b.exchange(ctx, src)
 	if err != nil {
@@ -274,8 +274,8 @@ func (b *rdmaBackend) allGather(ctx context.Context, elemSize int, dst, src []by
 	if len(src) == 0 {
 		return nil
 	}
-	if b.topo == topology.Ring && b.size > 2 {
-		return b.ringAllGather(ctx, dst, src)
+	if b.topo != topology.Mesh {
+		return b.graphAllGather(ctx, dst, src)
 	}
 	recvs, err := b.exchange(ctx, src)
 	if err != nil {
@@ -291,8 +291,8 @@ func (b *rdmaBackend) allGather(ctx context.Context, elemSize int, dst, src []by
 	return nil
 }
 
-func (b *rdmaBackend) ringAllReduce(ctx context.Context, op reductionOp, dt reduce.DType, dst, src []byte) error {
-	values, err := b.ringGather(ctx, src)
+func (b *rdmaBackend) graphAllReduce(ctx context.Context, op reductionOp, dt reduce.DType, dst, src []byte) error {
+	values, err := b.graphGather(ctx, src)
 	if err != nil {
 		return err
 	}
@@ -308,8 +308,8 @@ func (b *rdmaBackend) ringAllReduce(ctx context.Context, op reductionOp, dt redu
 	return nil
 }
 
-func (b *rdmaBackend) ringAllGather(ctx context.Context, dst, src []byte) error {
-	values, err := b.ringGather(ctx, src)
+func (b *rdmaBackend) graphAllGather(ctx context.Context, dst, src []byte) error {
+	values, err := b.graphGather(ctx, src)
 	if err != nil {
 		return err
 	}
@@ -319,45 +319,59 @@ func (b *rdmaBackend) ringAllGather(ctx context.Context, dst, src []byte) error 
 	return nil
 }
 
-func (b *rdmaBackend) ringGather(ctx context.Context, src []byte) ([][]byte, error) {
-	left := (b.rank - 1 + b.size) % b.size
-	right := (b.rank + 1) % b.size
-	recvConn, err := b.conn(left)
-	if err != nil {
-		return nil, err
+func (b *rdmaBackend) graphGather(ctx context.Context, src []byte) ([][]byte, error) {
+	payloadSize := b.size + b.size*len(src)
+	if payloadSize > rdmaStagingBytes {
+		return nil, fmt.Errorf("%s gather payload %d exceeds staging buffer %d", b.topo, payloadSize, rdmaStagingBytes)
 	}
-	sendConn, err := b.conn(right)
-	if err != nil {
-		return nil, err
-	}
-	locked := lockConns(recvConn, sendConn)
-	defer unlockConns(locked)
 
 	values := make([][]byte, b.size)
+	known := make([]bool, b.size)
 	values[b.rank] = append([]byte(nil), src...)
-	send := append([]byte(nil), src...)
-	for step := 0; step < b.size-1; step++ {
-		recvRank := mod(b.rank-step-1, b.size)
-		recv := make([]byte, len(src))
-		for off := 0; off < len(src); off += rdmaStagingBytes {
-			n := min(rdmaStagingBytes, len(src)-off)
-			if err := rdma.PostRecv(recvConn.qp, recvConn.recvMR, 0, n, workID(2, left)); err != nil {
-				return nil, fmt.Errorf("rank %d post recv: %w", left, err)
-			}
-			copy(sendConn.sendMR.Buffer()[:n], send[off:off+n])
-			if err := rdma.PostSend(sendConn.qp, sendConn.sendMR, 0, n, workID(1, right)); err != nil {
-				return nil, fmt.Errorf("rank %d post send: %w", right, err)
-			}
-			if err := b.poll(ctx, sendConn, 1); err != nil {
-				return nil, fmt.Errorf("rank %d send poll: %w", right, err)
-			}
-			if err := b.poll(ctx, recvConn, 1); err != nil {
-				return nil, fmt.Errorf("rank %d recv poll: %w", left, err)
-			}
-			copy(recv[off:off+n], recvConn.recvMR.Buffer()[:n])
+	known[b.rank] = true
+
+	neighbors := b.graphNeighbors()
+	conns := make([]*rdmaConn, 0, len(neighbors))
+	for _, peer := range neighbors {
+		conn, err := b.conn(peer)
+		if err != nil {
+			return nil, err
 		}
-		values[recvRank] = recv
-		send = recv
+		conns = append(conns, conn)
+	}
+	locked := lockConns(conns...)
+	defer unlockConns(locked)
+
+	send := make([]byte, payloadSize)
+	for step := 0; step < b.size-1; step++ {
+		encodeGraphGatherPayload(send, known, values, len(src))
+		for _, peer := range neighbors {
+			conn := b.conns[peer]
+			if err := rdma.PostRecv(conn.qp, conn.recvMR, 0, len(send), workID(2, peer)); err != nil {
+				return nil, fmt.Errorf("rank %d post recv: %w", peer, err)
+			}
+		}
+		for _, peer := range neighbors {
+			conn := b.conns[peer]
+			copy(conn.sendMR.Buffer()[:len(send)], send)
+			if err := rdma.PostSend(conn.qp, conn.sendMR, 0, len(send), workID(1, peer)); err != nil {
+				return nil, fmt.Errorf("rank %d post send: %w", peer, err)
+			}
+		}
+		for _, peer := range neighbors {
+			conn := b.conns[peer]
+			if err := b.poll(ctx, conn, 2); err != nil {
+				return nil, fmt.Errorf("rank %d poll: %w", peer, err)
+			}
+			if err := mergeGraphGatherPayload(known, values, conn.recvMR.Buffer()[:len(send)], len(src)); err != nil {
+				return nil, fmt.Errorf("rank %d payload: %w", peer, err)
+			}
+		}
+	}
+	for peer, ok := range known {
+		if !ok {
+			return nil, fmt.Errorf("rank %d value missing after %s gather", peer, b.topo)
+		}
 	}
 	return values, nil
 }
@@ -405,6 +419,42 @@ func (b *rdmaBackend) exchange(ctx context.Context, src []byte) ([][]byte, error
 		}
 	}
 	return recvs, nil
+}
+
+func (b *rdmaBackend) graphNeighbors() []int {
+	neighbors := make([]int, 0, len(b.conns))
+	for peer, conn := range b.conns {
+		if peer != b.rank && conn != nil {
+			neighbors = append(neighbors, peer)
+		}
+	}
+	return neighbors
+}
+
+func encodeGraphGatherPayload(payload []byte, known []bool, values [][]byte, elemLen int) {
+	clear(payload)
+	for rank, ok := range known {
+		if !ok {
+			continue
+		}
+		payload[rank] = 1
+		copy(payload[len(known)+rank*elemLen:len(known)+(rank+1)*elemLen], values[rank])
+	}
+}
+
+func mergeGraphGatherPayload(known []bool, values [][]byte, payload []byte, elemLen int) error {
+	n := len(known)
+	if len(payload) != n+n*elemLen {
+		return fmt.Errorf("length %d, want %d", len(payload), n+n*elemLen)
+	}
+	for rank := range known {
+		if payload[rank] == 0 || known[rank] {
+			continue
+		}
+		values[rank] = append([]byte(nil), payload[n+rank*elemLen:n+(rank+1)*elemLen]...)
+		known[rank] = true
+	}
+	return nil
 }
 
 func lockConns(conns ...*rdmaConn) []*rdmaConn {
@@ -521,12 +571,4 @@ func hasConn(conns []*rdmaConn, conn *rdmaConn) bool {
 		}
 	}
 	return false
-}
-
-func mod(x, n int) int {
-	x %= n
-	if x < 0 {
-		x += n
-	}
-	return x
 }

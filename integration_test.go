@@ -52,8 +52,12 @@ func TestIntegrationChild(t *testing.T) {
 	defer cancel()
 	backend := os.Getenv("JACCL_BACKEND")
 	socket := os.Getenv("JACCL_DAEMON_SOCKET")
-	fmt.Fprintf(os.Stderr, "rank %d: new group op=%s device=%s coordinator=%s backend=%s socket=%s\n", rank, op, device, coordinator, backend, socket)
-	g, err := NewGroup(ctx, integrationConfig(rank, size, device, coordinator, preferRing))
+	cfg, err := integrationConfig(rank, size, device, coordinator, preferRing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(os.Stderr, "rank %d: new group op=%s device=%s devices=%s coordinator=%s backend=%s socket=%s\n", rank, op, device, integrationDeviceMatrixPath(), coordinator, backend, socket)
+	g, err := NewGroup(ctx, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +172,11 @@ func TestIntegrationPeerFailure(t *testing.T) {
 	t.Run("PropagatesDialContextDeadline", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 		defer cancel()
-		_, err := NewGroup(ctx, integrationConfig(1, 2, device, "127.0.0.1:1", false))
+		cfg, err := integrationConfig(1, 2, device, "127.0.0.1:1", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = NewGroup(ctx, cfg)
 		if !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("NewGroup dial = %v, want context deadline", err)
 		}
@@ -190,9 +198,35 @@ func TestIntegrationMeshFallbackWhenRingInvalid(t *testing.T) {
 func TestIntegrationConfigDaemonBackendEnv(t *testing.T) {
 	t.Setenv("JACCL_BACKEND", BackendDaemon)
 	t.Setenv("JACCL_DAEMON_SOCKET", "/tmp/jaccld-test.sock")
-	cfg := integrationConfig(1, 2, "rdma_en1", "127.0.0.1:1", false)
+	cfg, err := integrationConfig(1, 2, "rdma_en1", "127.0.0.1:1", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Backend != BackendDaemon || cfg.DaemonSocket != "/tmp/jaccld-test.sock" {
 		t.Fatalf("backend/socket = %q/%q", cfg.Backend, cfg.DaemonSocket)
+	}
+}
+
+func TestIntegrationConfigDeviceMatrixEnv(t *testing.T) {
+	devices := lineDeviceMatrix("left", "right")
+	path := writeDevices(t, devices)
+	t.Setenv("JACCL_TEST_RDMA_DEVICES", path)
+	cfg, err := integrationConfig(1, 3, "", "127.0.0.1:1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Rank != 1 || len(cfg.Devices) != 3 || cfg.Devices[1][0][0] != "left" || cfg.Devices[1][2][0] != "right" {
+		t.Fatalf("integrationConfig devices = %+v", cfg.Devices)
+	}
+}
+
+func TestIntegrationConfigSingleDeviceExpandsCompleteMatrix(t *testing.T) {
+	cfg, err := integrationConfig(0, 3, "rdma_en1", "127.0.0.1:1", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Devices) != 3 || cfg.Devices[0][2][0] != "rdma_en1" {
+		t.Fatalf("integrationConfig devices = %+v", cfg.Devices)
 	}
 }
 
@@ -257,7 +291,24 @@ func runIntegrationCase(t *testing.T, size int, device string, preferRing bool, 
 	}
 }
 
-func integrationConfig(rank, size int, device, coordinator string, preferRing bool) Config {
+func integrationConfig(rank, size int, device, coordinator string, preferRing bool) (Config, error) {
+	if path := integrationDeviceMatrixPath(); path != "" {
+		devices, err := readDeviceMatrix(path)
+		if err != nil {
+			return Config{}, err
+		}
+		if size != len(devices) {
+			return Config{}, fmt.Errorf("test size %d does not match device matrix size %d", size, len(devices))
+		}
+		return Config{
+			Rank:         rank,
+			Coordinator:  coordinator,
+			Devices:      devices,
+			PreferRing:   preferRing,
+			Backend:      os.Getenv("JACCL_BACKEND"),
+			DaemonSocket: os.Getenv("JACCL_DAEMON_SOCKET"),
+		}, nil
+	}
 	devices := make([][][]string, size)
 	for i := range devices {
 		devices[i] = make([][]string, size)
@@ -275,6 +326,23 @@ func integrationConfig(rank, size int, device, coordinator string, preferRing bo
 		PreferRing:   preferRing,
 		Backend:      os.Getenv("JACCL_BACKEND"),
 		DaemonSocket: os.Getenv("JACCL_DAEMON_SOCKET"),
+	}, nil
+}
+
+func integrationDeviceMatrixPath() string {
+	for _, name := range []string{"JACCL_TEST_RDMA_DEVICES", "JACCL_IBV_DEVICES", "MLX_IBV_DEVICES"} {
+		if path := os.Getenv(name); path != "" {
+			return path
+		}
+	}
+	return ""
+}
+
+func lineDeviceMatrix(left, right string) [][][]string {
+	return [][][]string{
+		{{}, {left}, {}},
+		{{left}, {}, {right}},
+		{{}, {right}, {}},
 	}
 }
 

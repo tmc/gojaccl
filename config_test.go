@@ -210,6 +210,22 @@ func TestConfigValidate(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+	t.Run("ThreeRankLine", func(t *testing.T) {
+		cfg := fakeConfig(1, 3)
+		cfg.Devices = lineDeviceMatrix("left", "right")
+		cfg.PreferRing = true
+		if err := cfg.validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("FourRankConnectedPartial", func(t *testing.T) {
+		cfg := fakeConfig(3, 4)
+		cfg.Devices = fakePartialMatrix()
+		cfg.PreferRing = true
+		if err := cfg.validate(); err != nil {
+			t.Fatal(err)
+		}
+	})
 	t.Run("NegativeRank", func(t *testing.T) {
 		cfg := fakeConfig(0, 2)
 		cfg.Rank = -1

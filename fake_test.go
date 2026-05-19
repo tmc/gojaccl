@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -19,6 +20,7 @@ type fakeNetwork struct {
 	mu       sync.Mutex
 	closed   int
 	sends    map[[2]int]chan []byte
+	failEdge map[[2]int]error
 	barriers map[int]*fakeBarrier
 	reduces  map[int]*fakeReduce
 	gathers  map[int]*fakeGather
@@ -47,10 +49,11 @@ type fakeGather struct {
 }
 
 type fakeBackend struct {
-	rank int
-	size int
-	net  *fakeNetwork
-	ring bool
+	rank    int
+	size    int
+	net     *fakeNetwork
+	topo    topology.Topology
+	devices [][][]string
 
 	barrierSeq int
 	reduceSeq  int
@@ -61,6 +64,7 @@ func newFakeNetwork(size int) *fakeNetwork {
 	return &fakeNetwork{
 		size:     size,
 		sends:    make(map[[2]int]chan []byte),
+		failEdge: make(map[[2]int]error),
 		barriers: make(map[int]*fakeBarrier),
 		reduces:  make(map[int]*fakeReduce),
 		gathers:  make(map[int]*fakeGather),
@@ -74,8 +78,11 @@ func useFakeBackend(t *testing.T, net *fakeNetwork) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		topo, _ := topology.Choose(cfg.Devices, cfg.PreferRing)
-		return &fakeBackend{rank: cfg.Rank, size: len(cfg.Devices), net: net, ring: topo == topology.Ring}, nil
+		topo, err := topology.Choose(cfg.Devices, cfg.PreferRing)
+		if err != nil {
+			return nil, err
+		}
+		return &fakeBackend{rank: cfg.Rank, size: len(cfg.Devices), net: net, topo: topo, devices: cfg.Devices}, nil
 	}
 	t.Cleanup(func() { backendFactory = old })
 }
@@ -94,6 +101,30 @@ func fakeConfig(rank, size int) Config {
 	return Config{Rank: rank, Coordinator: "127.0.0.1:1", Devices: devices}
 }
 
+func fakeRingMatrix(size int) [][][]string {
+	devices := make([][][]string, size)
+	for rank := range devices {
+		devices[rank] = make([][]string, size)
+		for peer := range devices[rank] {
+			devices[rank][peer] = []string{}
+		}
+		left := (rank - 1 + size) % size
+		right := (rank + 1) % size
+		devices[rank][left] = []string{fmt.Sprintf("rdma%d%d", rank, left)}
+		devices[rank][right] = []string{fmt.Sprintf("rdma%d%d", rank, right)}
+	}
+	return devices
+}
+
+func fakePartialMatrix() [][][]string {
+	return [][][]string{
+		{{}, {"a"}, {"b"}, {}},
+		{{"a"}, {}, {"c"}, {"d"}},
+		{{"b"}, {"c"}, {}, {}},
+		{{}, {"d"}, {}, {}},
+	}
+}
+
 func writeDevices(t *testing.T, devices [][][]string) string {
 	t.Helper()
 	data, err := json.Marshal(devices)
@@ -108,10 +139,25 @@ func writeDevices(t *testing.T, devices [][][]string) string {
 }
 
 func newFakeGroup(rank, size int, net *fakeNetwork) *Group {
+	devices := fakeConfig(rank, size).Devices
 	return &Group{
 		rank:   rank,
 		size:   size,
-		b:      &fakeBackend{rank: rank, size: size, net: net},
+		b:      &fakeBackend{rank: rank, size: size, net: net, topo: topology.Mesh, devices: devices},
+		op:     make(chan struct{}, 1),
+		closed: make(chan struct{}),
+	}
+}
+
+func newFakeTopologyGroup(rank int, devices [][][]string, net *fakeNetwork, preferRing bool) *Group {
+	topo, err := topology.Choose(devices, preferRing)
+	if err != nil {
+		panic(err)
+	}
+	return &Group{
+		rank:   rank,
+		size:   len(devices),
+		b:      &fakeBackend{rank: rank, size: len(devices), net: net, topo: topo, devices: devices},
 		op:     make(chan struct{}, 1),
 		closed: make(chan struct{}),
 	}
@@ -143,8 +189,11 @@ func (b *fakeBackend) barrier(ctx context.Context) error {
 }
 
 func (b *fakeBackend) send(ctx context.Context, dst int, data []byte) error {
-	if b.ring && !b.neighbor(dst) {
-		return fmt.Errorf("rank %d is not a ring neighbor", dst)
+	if err := b.checkDirectPeer(dst); err != nil {
+		return err
+	}
+	if err := b.edgeErr(b.rank, dst); err != nil {
+		return err
 	}
 	ch := b.net.sendChan(b.rank, dst)
 	payload := append([]byte(nil), data...)
@@ -157,8 +206,11 @@ func (b *fakeBackend) send(ctx context.Context, dst int, data []byte) error {
 }
 
 func (b *fakeBackend) recv(ctx context.Context, src int, dst []byte) error {
-	if b.ring && !b.neighbor(src) {
-		return fmt.Errorf("rank %d is not a ring neighbor", src)
+	if err := b.checkDirectPeer(src); err != nil {
+		return err
+	}
+	if err := b.edgeErr(src, b.rank); err != nil {
+		return err
 	}
 	ch := b.net.sendChan(src, b.rank)
 	select {
@@ -174,6 +226,9 @@ func (b *fakeBackend) recv(ctx context.Context, src int, dst []byte) error {
 }
 
 func (b *fakeBackend) allReduce(ctx context.Context, op reductionOp, dt reduce.DType, dst, src []byte) error {
+	if err := b.checkCollectiveEdges(); err != nil {
+		return err
+	}
 	seq := b.reduceSeq
 	b.reduceSeq++
 	srcCopy := append([]byte(nil), src...)
@@ -211,6 +266,9 @@ func (b *fakeBackend) allReduce(ctx context.Context, op reductionOp, dt reduce.D
 }
 
 func (b *fakeBackend) allGather(ctx context.Context, elemSize int, dst, src []byte) error {
+	if err := b.checkCollectiveEdges(); err != nil {
+		return err
+	}
 	seq := b.gatherSeq
 	b.gatherSeq++
 	srcCopy := append([]byte(nil), src...)
@@ -251,10 +309,38 @@ func (b *fakeBackend) close() error {
 	return nil
 }
 
-func (b *fakeBackend) neighbor(rank int) bool {
-	left := (b.rank - 1 + b.size) % b.size
-	right := (b.rank + 1) % b.size
-	return rank == left || rank == right
+func (b *fakeBackend) checkDirectPeer(rank int) error {
+	if !hasUsablePath(b.devices[b.rank][rank]) {
+		return fmt.Errorf("rank %d has no %s connection", rank, b.topo)
+	}
+	return nil
+}
+
+func (b *fakeBackend) checkCollectiveEdges() error {
+	for src := 0; src < b.size; src++ {
+		for dst := 0; dst < b.size; dst++ {
+			if src == dst || !hasUsablePath(b.devices[src][dst]) {
+				continue
+			}
+			if err := b.edgeErr(src, dst); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (b *fakeBackend) edgeErr(src, dst int) error {
+	b.net.mu.Lock()
+	defer b.net.mu.Unlock()
+	return b.net.failEdge[[2]int{src, dst}]
+}
+
+func (n *fakeNetwork) failBidirectional(src, dst int, err error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.failEdge[[2]int{src, dst}] = err
+	n.failEdge[[2]int{dst, src}] = err
 }
 
 func (n *fakeNetwork) sendChan(src, dst int) chan []byte {
@@ -267,6 +353,15 @@ func (n *fakeNetwork) sendChan(src, dst int) chan []byte {
 		n.sends[key] = ch
 	}
 	return ch
+}
+
+func hasUsablePath(paths []string) bool {
+	for _, path := range paths {
+		if strings.TrimSpace(path) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func computeReduce(op reductionOp, dt reduce.DType, values [][]byte) ([]byte, error) {

@@ -71,10 +71,16 @@ point-to-point link between hosts, not a same-host loopback fabric.
 JACCL_TEST_RDMA=1 JACCL_TEST_RDMA_ALLOW_RTR=1 go test -run '^TestIntegration' .
 ```
 
-To run a physical two-host test, start one `TestIntegrationChild` process per
-host with `JACCL_TEST_RDMA_CHILD=1` and `JACCL_TEST_RDMA_ALLOW_RTR=1`,
-distinct `JACCL_TEST_RANK` values, the same reachable
-`JACCL_TEST_COORDINATOR`, and each host's local `JACCL_TEST_RDMA_DEVICE`.
+To run a physical test, start one `TestIntegrationChild` process per host with
+`JACCL_TEST_RDMA_CHILD=1` and `JACCL_TEST_RDMA_ALLOW_RTR=1`, distinct
+`JACCL_TEST_RANK` values, and the same reachable `JACCL_TEST_COORDINATOR`.
+The canonical topology input is an explicit JSON device matrix in
+`JACCL_TEST_RDMA_DEVICES`. That matrix may describe a complete mesh, or a sparse
+connected topology supported by the backend. The legacy single-device shorthand
+`JACCL_TEST_RDMA_DEVICE` expands to a complete matrix for the requested size; use
+`JACCL_TEST_RDMA_DEVICES` when ranks do not all have direct peer links. A sparse
+three-host line should leave the endpoint-to-endpoint entries empty in the
+matrix; no additional topology flag is required.
 
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.

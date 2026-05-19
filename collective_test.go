@@ -85,6 +85,93 @@ func TestCollectiveLengthValidation(t *testing.T) {
 	})
 }
 
+func TestCollectiveSimulatedLineTopology(t *testing.T) {
+	t.Run("AllSumThreeRankLine", func(t *testing.T) {
+		net := newFakeNetwork(3)
+		devices := lineDeviceMatrix("left", "right")
+		g0 := newFakeTopologyGroup(0, devices, net, true)
+		g1 := newFakeTopologyGroup(1, devices, net, true)
+		g2 := newFakeTopologyGroup(2, devices, net, true)
+		dst := [][]int32{{0}, {0}, {0}}
+		errc := make(chan error, 3)
+		go func() { errc <- AllSum(context.Background(), g0, dst[0], []int32{1}) }()
+		go func() { errc <- AllSum(context.Background(), g1, dst[1], []int32{2}) }()
+		go func() { errc <- AllSum(context.Background(), g2, dst[2], []int32{3}) }()
+		for i := 0; i < 3; i++ {
+			if err := <-errc; err != nil {
+				t.Fatal(err)
+			}
+		}
+		for rank, got := range dst {
+			if want := []int32{6}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("rank %d AllSum = %v, want %v", rank, got, want)
+			}
+		}
+	})
+	t.Run("AllGatherThreeRankLine", func(t *testing.T) {
+		net := newFakeNetwork(3)
+		devices := lineDeviceMatrix("left", "right")
+		g0 := newFakeTopologyGroup(0, devices, net, true)
+		g1 := newFakeTopologyGroup(1, devices, net, true)
+		g2 := newFakeTopologyGroup(2, devices, net, true)
+		dst := [][]int32{make([]int32, 3), make([]int32, 3), make([]int32, 3)}
+		errc := make(chan error, 3)
+		go func() { errc <- AllGather(context.Background(), g0, dst[0], []int32{1}) }()
+		go func() { errc <- AllGather(context.Background(), g1, dst[1], []int32{2}) }()
+		go func() { errc <- AllGather(context.Background(), g2, dst[2], []int32{3}) }()
+		for i := 0; i < 3; i++ {
+			if err := <-errc; err != nil {
+				t.Fatal(err)
+			}
+		}
+		for rank, got := range dst {
+			if want := []int32{1, 2, 3}; !reflect.DeepEqual(got, want) {
+				t.Fatalf("rank %d AllGather = %v, want %v", rank, got, want)
+			}
+		}
+	})
+	t.Run("InjectedEdgeFailure", func(t *testing.T) {
+		net := newFakeNetwork(3)
+		net.failBidirectional(1, 2, errors.New("simulated link down"))
+		devices := lineDeviceMatrix("left", "right")
+		g0 := newFakeTopologyGroup(0, devices, net, true)
+		dst := []int32{0}
+		err := AllSum(context.Background(), g0, dst, []int32{1})
+		if err == nil || !strings.Contains(err.Error(), "simulated link down") {
+			t.Fatalf("AllSum edge failure = %v, want simulated link down", err)
+		}
+	})
+}
+
+func TestCollectiveSimulatedConnectedTopology(t *testing.T) {
+	net := newFakeNetwork(4)
+	devices := fakePartialMatrix()
+	groups := []*Group{
+		newFakeTopologyGroup(0, devices, net, true),
+		newFakeTopologyGroup(1, devices, net, true),
+		newFakeTopologyGroup(2, devices, net, true),
+		newFakeTopologyGroup(3, devices, net, true),
+	}
+	dst := [][]int32{{0}, {0}, {0}, {0}}
+	errc := make(chan error, len(groups))
+	for rank, g := range groups {
+		rank, g := rank, g
+		go func() {
+			errc <- AllSum(context.Background(), g, dst[rank], []int32{int32(rank + 1)})
+		}()
+	}
+	for range groups {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for rank, got := range dst {
+		if want := []int32{10}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("rank %d AllSum = %v, want %v", rank, got, want)
+		}
+	}
+}
+
 func TestCollectiveContextCancellation(t *testing.T) {
 	tests := []struct {
 		name string
