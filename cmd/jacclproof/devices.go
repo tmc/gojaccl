@@ -5,10 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/tmc/gojaccl/internal/topology"
 )
+
+type edgeFlags []directedEdge
+
+type directedEdge struct {
+	src     int
+	dst     int
+	devices []string
+}
 
 func runDevicesCommand(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("devices", flag.ContinueOnError)
@@ -16,9 +25,11 @@ func runDevicesCommand(args []string, stdout, stderr io.Writer) error {
 	var ranks int
 	var devicesText string
 	var shape string
+	var edges edgeFlags
 	fs.IntVar(&ranks, "ranks", 2, "number of ranks")
 	fs.StringVar(&devicesText, "devices", "rdma_en1", "comma-separated RDMA devices for each connected edge")
 	fs.StringVar(&shape, "shape", "mesh", "matrix shape: mesh, ring, or line")
+	fs.Var(&edges, "edge", "directed edge src,dst=device[,device...]")
 	if err := fs.Parse(args); err != nil {
 		return exitError{code: 2, err: err}
 	}
@@ -32,6 +43,17 @@ func runDevicesCommand(args []string, stdout, stderr io.Writer) error {
 	matrix, err := buildDeviceMatrix(ranks, devices, shape)
 	if err != nil {
 		return exitError{code: 2, err: err}
+	}
+	if len(edges) > 0 {
+		for _, edge := range edges {
+			if edge.src < 0 || edge.src >= ranks || edge.dst < 0 || edge.dst >= ranks || edge.src == edge.dst {
+				return exitError{code: 2, err: fmt.Errorf("edge %d,%d is out of range for %d ranks", edge.src, edge.dst, ranks)}
+			}
+			matrix[edge.src][edge.dst] = append([]string(nil), edge.devices...)
+		}
+		if _, err := topology.Choose(matrix, false); err != nil {
+			return exitError{code: 2, err: err}
+		}
 	}
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "\t")
@@ -95,4 +117,37 @@ func buildDeviceMatrix(ranks int, devices []string, shape string) ([][][]string,
 		return nil, err
 	}
 	return matrix, nil
+}
+
+func (f *edgeFlags) String() string {
+	var parts []string
+	for _, edge := range *f {
+		parts = append(parts, fmt.Sprintf("%d,%d=%s", edge.src, edge.dst, strings.Join(edge.devices, ",")))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (f *edgeFlags) Set(text string) error {
+	left, right, ok := strings.Cut(text, "=")
+	if !ok {
+		return fmt.Errorf("edge %q missing =", text)
+	}
+	coords := strings.Split(left, ",")
+	if len(coords) != 2 {
+		return fmt.Errorf("edge %q must use src,dst=device", text)
+	}
+	src, err := strconv.Atoi(strings.TrimSpace(coords[0]))
+	if err != nil {
+		return fmt.Errorf("edge %q source: %w", text, err)
+	}
+	dst, err := strconv.Atoi(strings.TrimSpace(coords[1]))
+	if err != nil {
+		return fmt.Errorf("edge %q destination: %w", text, err)
+	}
+	devices, err := parseDeviceList(right)
+	if err != nil {
+		return err
+	}
+	*f = append(*f, directedEdge{src: src, dst: dst, devices: devices})
+	return nil
 }

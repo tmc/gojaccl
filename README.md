@@ -108,6 +108,18 @@ go run ./cmd/jacclproof devices \
 go run ./cmd/jacclproof topology -file /tmp/gojaccl-two-m4-devices.json
 ```
 
+If the attached cable maps to different RDMA device names on the two hosts,
+override the directed rows instead of forcing a symmetric name. For example, if
+rank 0 uses `rdma_en3` and rank 1 uses `rdma_en2`:
+
+```sh
+go run ./cmd/jacclproof devices \
+  -ranks 2 \
+  -edge 0,1=rdma_en3 \
+  -edge 1,0=rdma_en2 \
+  > /tmp/gojaccl-two-m4-devices.json
+```
+
 The topology report lists both `devices` and `primary_devices`. The direct
 backend currently opens the first usable device listed for each peer edge, so a
 dual-cable matrix is useful topology evidence but not a claim that both cables

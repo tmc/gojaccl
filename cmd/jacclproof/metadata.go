@@ -22,6 +22,7 @@ import (
 
 type metadataOptions struct {
 	Device           string
+	RemoteDevice     string
 	Remote           string
 	RemoteTmp        string
 	Root             string
@@ -63,6 +64,7 @@ func parseMetadataOptions(args []string, stderr io.Writer) (metadataOptions, met
 	fs := flag.NewFlagSet("rdma-metadata", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	device := fs.String("device", getenv("DEVICE", "rdma_en1"), "RDMA device")
+	remoteDevice := fs.String("remote-device", getenv("REMOTE_DEVICE", ""), "remote RDMA device; defaults to -device")
 	remote := fs.String("remote", os.Getenv("REMOTE"), "peer SSH target")
 	remoteTmp := fs.String("remote-tmp", os.Getenv("REMOTE_TMP"), "peer writable artifact directory")
 	root := fs.String("root", os.Getenv("ROOT"), "repository root")
@@ -88,6 +90,12 @@ func parseMetadataOptions(args []string, stderr io.Writer) (metadataOptions, met
 	if *timeout == 0 {
 		*timeout = profile.defaultTimeout
 	}
+	if *remoteDevice == "" {
+		*remoteDevice = *device
+	}
+	if _, err := metadataProfileForDevice(*remoteDevice); err != nil {
+		return metadataOptions{}, metadataProfile{}, exitError{code: 2, err: fmt.Errorf("remote-device: %w", err)}
+	}
 	if *stamp == "" {
 		*stamp = time.Now().UTC().Format("20060102T150405Z")
 	}
@@ -107,6 +115,7 @@ func parseMetadataOptions(args []string, stderr io.Writer) (metadataOptions, met
 	}
 	opts := metadataOptions{
 		Device:           *device,
+		RemoteDevice:     *remoteDevice,
 		Remote:           *remote,
 		RemoteTmp:        *remoteTmp,
 		Root:             *root,
@@ -131,6 +140,15 @@ func metadataProfileForDevice(device string) (metadataProfile, error) {
 			confirmationText: rdmaEn1MetadataRefusal,
 			requiresExpected: true,
 			rdmaStatusMode:   "enabled",
+		}, nil
+	case "rdma_en2":
+		return metadataProfile{
+			device:           device,
+			defaultMaxGIDs:   64,
+			defaultTimeout:   20 * time.Second,
+			confirmation:     "CONFIRM_RDMA_EN2_METADATA_ONE_SHOT",
+			confirmationText: rdmaEn2MetadataRefusal,
+			rdmaStatusMode:   "device-active",
 		}, nil
 	case "rdma_en3":
 		return metadataProfile{
@@ -233,6 +251,7 @@ func (r *metadataRun) writePreamble() error {
 		"REMOTE=" + r.opts.Remote,
 		"REMOTE_TMP=" + r.opts.RemoteTmp,
 		"DEVICE=" + r.opts.Device,
+		"REMOTE_DEVICE=" + r.opts.RemoteDevice,
 		fmt.Sprintf("MAX_GIDS=%d", r.opts.MaxGIDs),
 		fmt.Sprintf("EXPECTED_SELECTED_GID_INDEX=%d", r.opts.ExpectedGIDIndex),
 		fmt.Sprintf("TIMEOUT_SECONDS=%d", int(r.opts.Timeout/time.Second)),
@@ -249,6 +268,7 @@ func (r *metadataRun) writePreamble() error {
 	fmt.Fprintf(&readme, "# gojaccl %s metadata packet\n\n", r.opts.Device)
 	fmt.Fprintf(&readme, "- commit: %s\n", r.head)
 	fmt.Fprintf(&readme, "- device: %s\n", r.opts.Device)
+	fmt.Fprintf(&readme, "- remote_device: %s\n", r.opts.RemoteDevice)
 	fmt.Fprintf(&readme, "- max_gids: %d\n", r.opts.MaxGIDs)
 	if r.opts.ExpectedGIDIndex >= 0 {
 		fmt.Fprintf(&readme, "- expected_selected_gid_index: %d\n", r.opts.ExpectedGIDIndex)
@@ -293,21 +313,22 @@ func (r *metadataRun) capture() {
 	r.runCapture(localDir, "preflight-processes", 0, r.proofBin, "process-snapshot")
 
 	r.remoteCapture("preflight-rdma", "rdma_ctl status", true)
-	r.remoteCapture("preflight-ibv", "ibv_devinfo -d "+shellQuote(r.opts.Device), true)
+	r.remoteCapture("preflight-ibv", "ibv_devinfo -d "+shellQuote(r.opts.RemoteDevice), true)
 	r.remoteCapture("preflight-ifconfig", "ifconfig", false)
 	r.remoteCapture("preflight-netstat", "netstat -rn", false)
 	r.remoteCapture("preflight-processes", shellQuote(remoteProof)+" process-snapshot", false)
 
 	metaArgs := []string{"rdma-metadata", "-device", r.opts.Device, "-max-gids", strconv.Itoa(r.opts.MaxGIDs)}
 	r.runCapture(localDir, "rdma-metadata-"+r.opts.Device, r.opts.Timeout, append([]string{r.ctlBin}, metaArgs...)...)
-	r.remoteCapture("rdma-metadata-"+r.opts.Device, shellQuote(remoteCtl)+" "+joinShellArgs(metaArgs), true)
+	remoteMetaArgs := []string{"rdma-metadata", "-device", r.opts.RemoteDevice, "-max-gids", strconv.Itoa(r.opts.MaxGIDs)}
+	r.remoteCapture("rdma-metadata-"+r.opts.RemoteDevice, shellQuote(remoteCtl)+" "+joinShellArgs(remoteMetaArgs), true)
 
 	r.runCapture(localDir, "postflight-rdma", r.opts.Timeout, "rdma_ctl", "status")
 	r.runCapture(localDir, "postflight-ibv", r.opts.Timeout, "ibv_devinfo", "-d", r.opts.Device)
 	r.runCapture(localDir, "postflight-processes", 0, r.proofBin, "process-snapshot")
 
 	r.remoteCapture("postflight-rdma", "rdma_ctl status", true)
-	r.remoteCapture("postflight-ibv", "ibv_devinfo -d "+shellQuote(r.opts.Device), true)
+	r.remoteCapture("postflight-ibv", "ibv_devinfo -d "+shellQuote(r.opts.RemoteDevice), true)
 	r.remoteCapture("postflight-processes", shellQuote(remoteProof)+" process-snapshot", false)
 
 	r.summarizeMetadata("local")
@@ -410,25 +431,30 @@ func (r *metadataRun) evaluate() []string {
 		{"local", localDir},
 		{"remote", remoteDir},
 	} {
+		device := r.opts.Device
+		if side.name == "remote" {
+			device = r.opts.RemoteDevice
+		}
+		profile, _ := metadataProfileForDevice(device)
 		requireStatusZero(&failures, side.name+" preflight rdma", filepath.Join(side.dir, "preflight-rdma.status"))
 		requireStatusZero(&failures, side.name+" preflight ibv", filepath.Join(side.dir, "preflight-ibv.status"))
-		requireStatusZero(&failures, side.name+" metadata", filepath.Join(side.dir, "rdma-metadata-"+r.opts.Device+".status"))
+		requireStatusZero(&failures, side.name+" metadata", filepath.Join(side.dir, "rdma-metadata-"+device+".status"))
 		requireStatusZero(&failures, side.name+" postflight rdma", filepath.Join(side.dir, "postflight-rdma.status"))
 		requireStatusZero(&failures, side.name+" postflight ibv", filepath.Join(side.dir, "postflight-ibv.status"))
-		switch r.profile.rdmaStatusMode {
+		switch profile.rdmaStatusMode {
 		case "enabled":
 			requireContains(&failures, side.name+" preflight rdma", filepath.Join(side.dir, "preflight-rdma.out"), "enabled")
 			requireContains(&failures, side.name+" postflight rdma", filepath.Join(side.dir, "postflight-rdma.out"), "enabled")
 		case "device-active":
-			requireLineContains(&failures, side.name+" preflight rdma", filepath.Join(side.dir, "preflight-rdma.out"), r.opts.Device, "PORT_ACTIVE")
-			requireLineContains(&failures, side.name+" postflight rdma", filepath.Join(side.dir, "postflight-rdma.out"), r.opts.Device, "PORT_ACTIVE")
+			requireContains(&failures, side.name+" preflight rdma", filepath.Join(side.dir, "preflight-rdma.out"), "enabled")
+			requireContains(&failures, side.name+" postflight rdma", filepath.Join(side.dir, "postflight-rdma.out"), "enabled")
 		}
-		requireContains(&failures, side.name+" preflight ibv", filepath.Join(side.dir, "preflight-ibv.out"), r.opts.Device)
-		requireContains(&failures, side.name+" postflight ibv", filepath.Join(side.dir, "postflight-ibv.out"), r.opts.Device)
+		requireContains(&failures, side.name+" preflight ibv", filepath.Join(side.dir, "preflight-ibv.out"), device)
+		requireContains(&failures, side.name+" postflight ibv", filepath.Join(side.dir, "postflight-ibv.out"), device)
 		requireContains(&failures, side.name+" preflight ibv", filepath.Join(side.dir, "preflight-ibv.out"), "PORT_ACTIVE")
 		requireContains(&failures, side.name+" postflight ibv", filepath.Join(side.dir, "postflight-ibv.out"), "PORT_ACTIVE")
-		meta := filepath.Join(side.dir, "rdma-metadata-"+r.opts.Device+".out")
-		requireContains(&failures, side.name+" metadata", meta, "rdma metadata device="+r.opts.Device)
+		meta := filepath.Join(side.dir, "rdma-metadata-"+device+".out")
+		requireContains(&failures, side.name+" metadata", meta, "rdma metadata device="+device)
 		requireContains(&failures, side.name+" metadata", meta, fmt.Sprintf("gid_scan_limit=%d", r.opts.MaxGIDs))
 		if r.opts.ExpectedGIDIndex >= 0 {
 			requireContains(&failures, side.name+" metadata", meta, fmt.Sprintf("selected_gid_index=%d", r.opts.ExpectedGIDIndex))
@@ -454,6 +480,7 @@ func (r *metadataRun) writeSummary(failures []string) error {
 		State            string `json:"state"`
 		Commit           string `json:"commit"`
 		Device           string `json:"device"`
+		RemoteDevice     string `json:"remote_device"`
 		MaxGIDs          int    `json:"max_gids"`
 		ExpectedGIDIndex int    `json:"expected_selected_gid_index,omitempty"`
 		TimeoutSeconds   int    `json:"timeout_seconds"`
@@ -462,6 +489,7 @@ func (r *metadataRun) writeSummary(failures []string) error {
 		State:            state,
 		Commit:           r.head,
 		Device:           r.opts.Device,
+		RemoteDevice:     r.opts.RemoteDevice,
 		MaxGIDs:          r.opts.MaxGIDs,
 		ExpectedGIDIndex: r.opts.ExpectedGIDIndex,
 		TimeoutSeconds:   int(r.opts.Timeout / time.Second),
@@ -516,7 +544,11 @@ func (r *metadataRun) artifactManifest() ([]string, error) {
 }
 
 func (r *metadataRun) summarizeMetadata(side string) {
-	out := filepath.Join(r.opts.Artifact, side, "rdma-metadata-"+r.opts.Device+".out")
+	device := r.opts.Device
+	if side == "remote" {
+		device = r.opts.RemoteDevice
+	}
+	out := filepath.Join(r.opts.Artifact, side, "rdma-metadata-"+device+".out")
 	data, err := os.ReadFile(out)
 	if err != nil || len(data) == 0 {
 		return

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,11 @@ func TestProofCommandsRefuseWithoutConfirmation(t *testing.T) {
 			name: "en1 metadata",
 			args: []string{"rdma-metadata", "-device", "rdma_en1"},
 			want: []string{"refusing to run", "CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata", "one-shot metadata"},
+		},
+		{
+			name: "en2 metadata",
+			args: []string{"rdma-metadata", "-device", "rdma_en2"},
+			want: []string{"refusing to run", "CONFIRM_RDMA_EN2_METADATA_ONE_SHOT=one-shot-metadata", "one-shot metadata"},
 		},
 		{
 			name: "en3 metadata",
@@ -147,6 +153,32 @@ func TestDevicesCommandWritesTwoRankDualCableMatrix(t *testing.T) {
 	}
 }
 
+func TestDevicesCommandAcceptsDirectedEdges(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if err := run([]string{
+		"devices",
+		"-ranks", "2",
+		"-devices", "rdma_en1",
+		"-edge", "0,1=rdma_en3",
+		"-edge", "1,0=rdma_en2",
+	}, &stdout, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	var matrix [][][]string
+	if err := json.Unmarshal(stdout.Bytes(), &matrix); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(matrix[0][1], ","); got != "rdma_en3" {
+		t.Fatalf("matrix[0][1] = %q, want rdma_en3", got)
+	}
+	if got := strings.Join(matrix[1][0], ","); got != "rdma_en2" {
+		t.Fatalf("matrix[1][0] = %q, want rdma_en2", got)
+	}
+}
+
 func TestDevicesCommandRejectsBadShape(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := run([]string{"devices", "-shape", "star"}, &stdout, &stderr)
@@ -190,6 +222,12 @@ func TestMetadataOptionsPreserveDeviceDefaults(t *testing.T) {
 			wantMaxGID:  64,
 			wantTimeout: 20 * time.Second,
 		},
+		{
+			name:        "en2 supports remote device override",
+			args:        []string{"-device", "rdma_en2", "-remote-device", "rdma_en3", "-remote", "peer", "-remote-tmp", "/tmp"},
+			wantMaxGID:  64,
+			wantTimeout: 20 * time.Second,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,6 +237,9 @@ func TestMetadataOptionsPreserveDeviceDefaults(t *testing.T) {
 			}
 			if opts.MaxGIDs != tt.wantMaxGID {
 				t.Fatalf("MaxGIDs = %d, want %d", opts.MaxGIDs, tt.wantMaxGID)
+			}
+			if tt.name == "en2 supports remote device override" && opts.RemoteDevice != "rdma_en3" {
+				t.Fatalf("RemoteDevice = %q, want rdma_en3", opts.RemoteDevice)
 			}
 			if opts.Timeout != tt.wantTimeout {
 				t.Fatalf("Timeout = %s, want %s", opts.Timeout, tt.wantTimeout)
@@ -289,6 +330,149 @@ func TestRDMAMetadataPacketDoesNotAllocateResources(t *testing.T) {
 	} {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("rdma metadata packet command must not call %s", forbidden)
+		}
+	}
+}
+
+func TestMetadataEvaluateAcceptsAggregateRDMACtlForDeviceActive(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"local", "remote", "proof"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctl := filepath.Join(dir, "jacclctl")
+	proof := filepath.Join(dir, "jacclproof")
+	for _, path := range []string{ctl, proof} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeStatus := func(subdir, name string, status int) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, subdir, name+".status"), []byte(strconv.Itoa(status)+"\n"), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeOut := func(subdir, name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, subdir, name+".out"), []byte(text), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{
+		"build-jacclctl",
+		"build-jacclproof",
+		"remote-mkdir",
+		"copy-jacclctl",
+		"copy-jacclproof",
+		"remote-jacclctl-sha256",
+		"remote-jacclproof-sha256",
+	} {
+		writeStatus("proof", name, 0)
+	}
+	for _, name := range []string{"jacclctl-sha256", "jacclproof-sha256"} {
+		writeStatus("local", name, 0)
+	}
+	writeOut("local", "jacclctl-sha256", "abc  jacclctl\n")
+	writeOut("proof", "remote-jacclctl-sha256", "abc  jacclctl\n")
+	writeOut("local", "jacclproof-sha256", "def  jacclproof\n")
+	writeOut("proof", "remote-jacclproof-sha256", "def  jacclproof\n")
+
+	for _, side := range []struct {
+		name   string
+		device string
+	}{
+		{"local", "rdma_en2"},
+		{"remote", "rdma_en3"},
+	} {
+		for _, name := range []string{
+			"preflight-rdma",
+			"preflight-ibv",
+			"rdma-metadata-" + side.device,
+			"postflight-rdma",
+			"postflight-ibv",
+		} {
+			writeStatus(side.name, name, 0)
+		}
+		for _, name := range []string{"preflight-processes", "postflight-processes"} {
+			writeStatus(side.name, name, 1)
+			writeOut(side.name, name, "")
+		}
+		writeOut(side.name, "preflight-rdma", "enabled\n")
+		writeOut(side.name, "postflight-rdma", "enabled\n")
+		ibv := "hca_id:\t" + side.device + "\n\t\t\tstate:\t\t\tPORT_ACTIVE (4)\n"
+		writeOut(side.name, "preflight-ibv", ibv)
+		writeOut(side.name, "postflight-ibv", ibv)
+		writeOut(side.name, "rdma-metadata-"+side.device, "rdma metadata device="+side.device+" gid_scan_limit=64\n")
+	}
+
+	r := metadataRun{
+		opts: metadataOptions{
+			Device:           "rdma_en2",
+			RemoteDevice:     "rdma_en3",
+			MaxGIDs:          64,
+			ExpectedGIDIndex: -1,
+			Artifact:         dir,
+		},
+		profile:  metadataProfile{rdmaStatusMode: "device-active"},
+		ctlBin:   ctl,
+		proofBin: proof,
+	}
+	if failures := r.evaluate(); len(failures) != 0 {
+		t.Fatalf("evaluate failures = %v", failures)
+	}
+}
+
+func TestMetadataSummariesUseSideSpecificDevices(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"local", "remote"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := metadataRun{
+		opts: metadataOptions{
+			Device:       "rdma_en2",
+			RemoteDevice: "rdma_en3",
+			Artifact:     dir,
+		},
+	}
+	fixtures := []struct {
+		side   string
+		device string
+		gid    string
+	}{
+		{"local", "rdma_en2", "fe80::1"},
+		{"remote", "rdma_en3", "fe80::2"},
+	}
+	for _, f := range fixtures {
+		text := strings.Join([]string{
+			"rdma metadata device=" + f.device + " port=1 lid=1 gid_tbl_len=1024 gid_scan_limit=64 selected_gid_index=0",
+			"gid index=0 value=" + f.gid + " ipv4_mapped=false zero=false",
+			"gid index=1 value=:: ipv4_mapped=false zero=true",
+			"",
+		}, "\n")
+		path := filepath.Join(dir, f.side, "rdma-metadata-"+f.device+".out")
+		if err := os.WriteFile(path, []byte(text), 0666); err != nil {
+			t.Fatal(err)
+		}
+		r.summarizeMetadata(f.side)
+		got, err := os.ReadFile(filepath.Join(dir, f.side, "gid-summary.txt"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		summary := string(got)
+		for _, want := range []string{
+			"rdma metadata device=" + f.device,
+			"nonzero_gid_count=1",
+			"ipv4_mapped_gid_count=0",
+			f.gid,
+		} {
+			if !strings.Contains(summary, want) {
+				t.Fatalf("%s summary missing %q in:\n%s", f.side, want, summary)
+			}
 		}
 	}
 }

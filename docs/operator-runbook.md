@@ -53,6 +53,20 @@ go run ./cmd/jacclproof devices \
 go run ./cmd/jacclproof topology -file /tmp/gojaccl-two-m4-devices.json
 ```
 
+If the attached cable maps to different RDMA device names on the two hosts,
+generate the matrix with directed edges. For example, if rank 0 is the remote
+host using `rdma_en3` and rank 1 is the local host using `rdma_en2`:
+
+```sh
+go run ./cmd/jacclproof devices \
+  -ranks 2 \
+  -edge 0,1=rdma_en3 \
+  -edge 1,0=rdma_en2 \
+  > /tmp/gojaccl-two-m4-devices.json
+
+go run ./cmd/jacclproof topology -file /tmp/gojaccl-two-m4-devices.json
+```
+
 The topology command is provider-free. Its `devices` field records every device
 named in the matrix, while `primary_devices` records the first usable device on
 each directed edge. The direct backend opens that first device per peer edge.
@@ -72,6 +86,17 @@ CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
 CONFIRM_RDMA_EN3_METADATA_ONE_SHOT=one-shot-metadata \
   go run ./cmd/jacclproof rdma-metadata \
     -device rdma_en3 \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir>
+```
+
+For asymmetric device names, run the metadata packet with `-remote-device`:
+
+```sh
+CONFIRM_RDMA_EN2_METADATA_ONE_SHOT=one-shot-metadata \
+  go run ./cmd/jacclproof rdma-metadata \
+    -device rdma_en2 \
+    -remote-device rdma_en3 \
     -remote <peer-ssh> \
     -remote-tmp <peer-tmp-dir>
 ```
