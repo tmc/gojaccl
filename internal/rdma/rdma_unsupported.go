@@ -47,6 +47,10 @@ func ReadyToReceive(qp *QueuePair, local, remote Destination) error {
 	return ErrUnavailable
 }
 
+func ReadyToReceiveMask() int {
+	return 0
+}
+
 func ReadyToSend(qp *QueuePair, psn uint32) error {
 	return ErrUnavailable
 }

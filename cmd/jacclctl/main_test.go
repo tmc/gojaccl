@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,6 +288,184 @@ func TestRunRDMAInitCommandValidation(t *testing.T) {
 	}
 }
 
+func TestRunRDMARTRDiagnosticCommandValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing device",
+			args: []string{"-artifact", t.TempDir(), "-peer-destination", "peer.json", "-allow-rtr"},
+			want: "device is required",
+		},
+		{
+			name: "missing artifact",
+			args: []string{"-device", "rdma_en3", "-peer-destination", "peer.json", "-allow-rtr"},
+			want: "artifact is required",
+		},
+		{
+			name: "missing peer destination",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-allow-rtr"},
+			want: "peer-destination is required",
+		},
+		{
+			name: "bad cq capacity",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-peer-destination", "peer.json", "-cq-capacity", "0", "-allow-rtr"},
+			want: "cq-capacity 0 must be positive",
+		},
+		{
+			name: "bad wait",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-peer-destination", "peer.json", "-wait-peer", "0", "-allow-rtr"},
+			want: "wait-peer 0s must be positive",
+		},
+		{
+			name: "missing gate",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-peer-destination", "peer.json", "-allow-rtr"},
+			want: rtrDiagnosticGate + "=one-shot-rtr",
+		},
+		{
+			name: "missing allow flag",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-peer-destination", "peer.json"},
+			want: "-allow-rtr",
+		},
+		{
+			name: "unexpected argument",
+			args: []string{"-device", "rdma_en3", "-artifact", t.TempDir(), "-peer-destination", "peer.json", "-allow-rtr", "extra"},
+			want: "unexpected rdma-rtr-diagnostic arguments",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runRDMARTRDiagnosticCommand(context.Background(), tt.args, &out)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runRDMARTRDiagnosticCommand = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRTRDestinationRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dst.json")
+	want := rtrDestinationRecord{
+		Device:         "rdma_en3",
+		RouteInterface: "en0",
+		LID:            3,
+		QPN:            17,
+		PSN:            7,
+		GIDIndex:       1,
+		GID:            "::ffff:10.0.199.147",
+	}
+	if err := writeRTRDestination(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, dst, err := readRTRDestination(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Device != want.Device || got.RouteInterface != want.RouteInterface {
+		t.Fatalf("record = %+v, want %+v", got, want)
+	}
+	if dst.LID != want.LID || dst.QPN != want.QPN || dst.PSN != want.PSN || dst.GIDIndex != want.GIDIndex {
+		t.Fatalf("destination = %+v, want metadata from %+v", dst, want)
+	}
+	if got := netip.AddrFrom16(dst.GID).String(); got != want.GID {
+		t.Fatalf("gid = %s, want %s", got, want.GID)
+	}
+}
+
+func TestRTRDestinationRejectsZeroQPN(t *testing.T) {
+	_, err := (rtrDestinationRecord{GID: "::1"}).destination()
+	if err == nil || !strings.Contains(err.Error(), "qpn is zero") {
+		t.Fatalf("destination error = %v, want qpn", err)
+	}
+}
+
+func TestWriteRTRReport(t *testing.T) {
+	dir := t.TempDir()
+	report := rtrDiagnosticReport{
+		Command: "rdma-rtr-diagnostic",
+		Device:  "rdma_en3",
+		State:   "rtr_failed",
+		Error:   "change queue pair to RTR: errno 60 (ETIMEDOUT) mask=0x1f",
+		Local: rtrDestinationRecord{
+			LID:      3,
+			QPN:      17,
+			PSN:      7,
+			GIDIndex: 0,
+			GID:      "fe80::1",
+		},
+		Remote: rtrDestinationRecord{
+			LID:      3,
+			QPN:      18,
+			PSN:      7,
+			GIDIndex: 0,
+			GID:      "fe80::2",
+		},
+		Transition: rtrTransition(),
+	}
+	if err := writeRTRReport(dir, report); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "rtr-diagnostic-report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got rtrDiagnosticReport
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.State != report.State || !strings.Contains(got.Error, "ETIMEDOUT") || got.Transition.MaskHex == "" {
+		t.Fatalf("report = %+v, want failed ETIMEDOUT with mask", got)
+	}
+}
+
+func TestFormatRTRDiagnostic(t *testing.T) {
+	report := rtrDiagnosticReport{
+		Device:             "rdma_en3",
+		RouteInterface:     "en0",
+		PeerRouteInterface: "en0",
+		State:              "rtr_failed",
+		Error:              "change queue pair to RTR: errno 60 (ETIMEDOUT) mask=0x1f",
+		IndexZeroRoute:     true,
+		Local: rtrDestinationRecord{
+			LID:      3,
+			QPN:      17,
+			PSN:      7,
+			GIDIndex: 0,
+			GID:      "fe80::1",
+		},
+		Remote: rtrDestinationRecord{
+			LID:      3,
+			QPN:      18,
+			PSN:      7,
+			GIDIndex: 0,
+			GID:      "fe80::2",
+		},
+		Transition: rtrTransition(),
+	}
+	var out bytes.Buffer
+	formatRTRDiagnostic(&out, report)
+	got := out.String()
+	for _, want := range []string{
+		"state=rtr_failed",
+		"device=rdma_en3",
+		"route_interface=en0",
+		"local_qpn=17",
+		"remote_qpn=18",
+		"work_requests=false",
+		"ready_to_send=false",
+		"datapath_claim=false",
+		"ETIMEDOUT",
+		"warning=local_selected_gid_index_zero",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("diagnostic output missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestFormatRDMAPortInfo(t *testing.T) {
 	info := rdma.PortInfo{
 		Device:           "rdma_en3",
@@ -426,6 +606,43 @@ func TestRDMAResourceCommandDoesNotRTROrPost(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("rdma allocation command must not call %s", forbidden)
+		}
+	}
+}
+
+func TestRDMARTRDiagnosticCommandDoesNotRTSOrPost(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func runRDMARTRDiagnosticCommand")
+	if start < 0 {
+		t.Fatal("runRDMARTRDiagnosticCommand not found")
+	}
+	end := strings.Index(text[start:], "\nfunc rtrTransition")
+	if end < 0 {
+		t.Fatal("rtrTransition not found")
+	}
+	body := text[start : start+end]
+	for _, want := range []string{
+		"InitQueuePair",
+		"LocalDestination",
+		"ReadyToReceive",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rdma rtr diagnostic missing %s", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"ReadyToSend",
+		"PostSend",
+		"PostRecv",
+		"PostWrite",
+		"tcpchan",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rdma rtr diagnostic command must not call %s", forbidden)
 		}
 	}
 }

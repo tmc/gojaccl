@@ -198,6 +198,28 @@ go run ./cmd/jacclproof rdma-init \
 
 RTR, RTS, and datapath work requests remain separate hardware gates.
 
+To isolate provider `INIT->RTR` failures without starting `jaccld` or using
+the `tcpchan` side channel, run the bounded RTR diagnostic on both hosts and
+exchange the destination JSON files out of band:
+
+```sh
+JACCLCTL_RDMA_RTR_DIAGNOSTIC_ONE_SHOT=one-shot-rtr \
+  jacclctl rdma-rtr-diagnostic \
+  -device rdma_en3 \
+  -route-interface en0 \
+  -peer-route-interface en0 \
+  -artifact /tmp/gojaccl-rtr-diag-local \
+  -peer-destination /tmp/gojaccl-rtr-diag-local/peer-destination.json \
+  -allow-rtr
+```
+
+The command writes `local-destination.json`, waits for
+`peer-destination.json`, runs only the RESET-to-INIT and INIT-to-RTR queue-pair
+transitions, and writes `rtr-diagnostic-report.json`. It does not move the
+queue pair to RTS, post work requests, or claim datapath success. Provider
+errors include symbolic errno text, such as `errno 60 (ETIMEDOUT)`, and the QP
+transition mask.
+
 An operator can trigger the explicit maintenance operation through the daemon
 socket:
 

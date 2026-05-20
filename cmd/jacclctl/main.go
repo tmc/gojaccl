@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/tmc/gojaccl/internal/ipc"
@@ -40,6 +41,7 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-metadata -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-alloc -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-init -device name\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-rtr-diagnostic -device name -artifact dir -peer-destination file -allow-rtr\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] tcp-diagnostic (-listen addr | -dial addr)\n")
 		flag.PrintDefaults()
 	}
@@ -73,6 +75,10 @@ func main() {
 		}
 	case "rdma-init":
 		if err := runRDMAInitCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+	case "rdma-rtr-diagnostic":
+		if err := runRDMARTRDiagnosticCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatal(err)
 		}
 	default:
@@ -295,6 +301,326 @@ func formatRDMAResource(out io.Writer, command, device string, cqCapacity, mrByt
 	fmt.Fprintln(out, "resource completion_queue=allocated")
 	fmt.Fprintln(out, "resource queue_pair=allocated")
 	fmt.Fprintln(out, "resource memory_region=allocated")
+}
+
+const rtrDiagnosticGate = "JACCLCTL_RDMA_RTR_DIAGNOSTIC_ONE_SHOT"
+
+type rtrDiagnosticReport struct {
+	Command              string               `json:"command"`
+	Device               string               `json:"device"`
+	RouteInterface       string               `json:"route_interface,omitempty"`
+	PeerRouteInterface   string               `json:"peer_route_interface,omitempty"`
+	CQCapacity           int                  `json:"cq_capacity"`
+	AllowRTR             bool                 `json:"allow_rtr"`
+	Gate                 string               `json:"gate"`
+	GeneratedAt          time.Time            `json:"generated_at"`
+	Local                rtrDestinationRecord `json:"local"`
+	Remote               rtrDestinationRecord `json:"remote"`
+	Transition           rtrTransitionReport  `json:"transition"`
+	State                string               `json:"state"`
+	Error                string               `json:"error,omitempty"`
+	WorkRequests         bool                 `json:"work_requests"`
+	ReadyToSend          bool                 `json:"ready_to_send"`
+	DatapathClaim        bool                 `json:"datapath_claim"`
+	IndexZeroRoute       bool                 `json:"index_zero_route"`
+	IPv4MappedRoute      bool                 `json:"ipv4_mapped_route"`
+	LocalDestinationFile string               `json:"local_destination_file"`
+	PeerDestinationFile  string               `json:"peer_destination_file"`
+}
+
+type rtrTransitionReport struct {
+	From      string   `json:"from"`
+	To        string   `json:"to"`
+	Mask      int      `json:"mask"`
+	MaskHex   string   `json:"mask_hex"`
+	MaskNames []string `json:"mask_names"`
+}
+
+type rtrDestinationRecord struct {
+	Device         string    `json:"device,omitempty"`
+	RouteInterface string    `json:"route_interface,omitempty"`
+	LID            uint16    `json:"lid"`
+	QPN            uint32    `json:"qpn"`
+	PSN            uint32    `json:"psn"`
+	GIDIndex       int       `json:"gid_index"`
+	GID            string    `json:"gid"`
+	GeneratedAt    time.Time `json:"generated_at,omitempty"`
+}
+
+func runRDMARTRDiagnosticCommand(ctx context.Context, args []string, out io.Writer) (err error) {
+	fs := flag.NewFlagSet("rdma-rtr-diagnostic", flag.ContinueOnError)
+	fs.SetOutput(out)
+	device := fs.String("device", "", "RDMA device name")
+	artifact := fs.String("artifact", "", "directory for local destination and final report")
+	localDestination := fs.String("local-destination", "", "path to write local destination JSON")
+	peerDestination := fs.String("peer-destination", "", "path to read peer destination JSON")
+	routeInterface := fs.String("route-interface", "", "local route interface name recorded in the report")
+	peerRouteInterface := fs.String("peer-route-interface", "", "peer route interface name recorded in the report")
+	cqCapacity := fs.Int("cq-capacity", 4, "completion queue capacity")
+	waitPeer := fs.Duration("wait-peer", 2*time.Minute, "maximum time to wait for peer destination JSON")
+	allowRTR := fs.Bool("allow-rtr", false, "allow one RTR transition diagnostic")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected rdma-rtr-diagnostic arguments")
+	}
+	if *device == "" {
+		return fmt.Errorf("device is required")
+	}
+	if *artifact == "" {
+		return fmt.Errorf("artifact is required")
+	}
+	if *cqCapacity <= 0 {
+		return fmt.Errorf("cq-capacity %d must be positive", *cqCapacity)
+	}
+	if *waitPeer <= 0 {
+		return fmt.Errorf("wait-peer %s must be positive", *waitPeer)
+	}
+	if *peerDestination == "" {
+		return fmt.Errorf("peer-destination is required")
+	}
+	if !*allowRTR || os.Getenv(rtrDiagnosticGate) != "one-shot-rtr" {
+		return fmt.Errorf("rdma-rtr-diagnostic refuses to run without -allow-rtr and %s=one-shot-rtr", rtrDiagnosticGate)
+	}
+	if err := os.MkdirAll(*artifact, 0777); err != nil {
+		return fmt.Errorf("create artifact: %w", err)
+	}
+	if *localDestination == "" {
+		*localDestination = filepath.Join(*artifact, "local-destination.json")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	report := rtrDiagnosticReport{
+		Command:              "rdma-rtr-diagnostic",
+		Device:               *device,
+		RouteInterface:       *routeInterface,
+		PeerRouteInterface:   *peerRouteInterface,
+		CQCapacity:           *cqCapacity,
+		AllowRTR:             true,
+		Gate:                 rtrDiagnosticGate,
+		GeneratedAt:          time.Now().UTC(),
+		Transition:           rtrTransition(),
+		State:                "started",
+		LocalDestinationFile: *localDestination,
+		PeerDestinationFile:  *peerDestination,
+	}
+	defer func() {
+		report.GeneratedAt = time.Now().UTC()
+		if writeErr := writeRTRReport(*artifact, report); writeErr != nil && err == nil {
+			err = writeErr
+		}
+	}()
+
+	type cleanup struct {
+		name string
+		fn   func() error
+	}
+	var cleanups []cleanup
+	defer func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			if closeErr := cleanups[i].fn(); closeErr != nil && err == nil {
+				err = fmt.Errorf("close %s: %w", cleanups[i].name, closeErr)
+			}
+		}
+	}()
+
+	dev, err := rdma.OpenDevice(*device)
+	if err != nil {
+		report.State = "open_failed"
+		report.Error = err.Error()
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"device", dev.Close})
+	pd, err := rdma.NewProtectionDomain(dev)
+	if err != nil {
+		report.State = "pd_failed"
+		report.Error = err.Error()
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"protection domain", pd.Close})
+	cq, err := rdma.NewCompletionQueue(dev, *cqCapacity)
+	if err != nil {
+		report.State = "cq_failed"
+		report.Error = err.Error()
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"completion queue", cq.Close})
+	qp, err := rdma.NewQueuePair(pd, cq)
+	if err != nil {
+		report.State = "qp_failed"
+		report.Error = err.Error()
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"queue pair", qp.Close})
+	if err := rdma.InitQueuePair(qp); err != nil {
+		report.State = "init_failed"
+		report.Error = err.Error()
+		return err
+	}
+	local, err := rdma.LocalDestination(qp)
+	if err != nil {
+		report.State = "local_destination_failed"
+		report.Error = err.Error()
+		return err
+	}
+	report.Local = newRTRDestinationRecord(*device, *routeInterface, local)
+	report.IndexZeroRoute = local.GIDIndex == 0 && local.GID != ([16]byte{})
+	report.IPv4MappedRoute = netip.AddrFrom16(local.GID).Is4In6()
+	if err := writeRTRDestination(*localDestination, report.Local); err != nil {
+		report.State = "write_local_destination_failed"
+		report.Error = err.Error()
+		return err
+	}
+	remoteRecord, remote, err := waitRTRDestination(ctx, *peerDestination, *waitPeer)
+	if err != nil {
+		report.State = "peer_destination_failed"
+		report.Error = err.Error()
+		return err
+	}
+	if remoteRecord.RouteInterface == "" {
+		remoteRecord.RouteInterface = *peerRouteInterface
+	}
+	report.Remote = remoteRecord
+	if err := rdma.ReadyToReceive(qp, local, remote); err != nil {
+		report.State = "rtr_failed"
+		report.Error = err.Error()
+		formatRTRDiagnostic(out, report)
+		return err
+	}
+	report.State = "rtr_ready"
+	formatRTRDiagnostic(out, report)
+	return nil
+}
+
+func rtrTransition() rtrTransitionReport {
+	mask := rdma.ReadyToReceiveMask()
+	return rtrTransitionReport{
+		From:    "INIT",
+		To:      "RTR",
+		Mask:    mask,
+		MaskHex: fmt.Sprintf("0x%x", mask),
+		MaskNames: []string{
+			"IBV_QP_STATE",
+			"IBV_QP_AV",
+			"IBV_QP_PATH_MTU",
+			"IBV_QP_DEST_QPN",
+			"IBV_QP_RQ_PSN",
+		},
+	}
+}
+
+func writeRTRReport(dir string, report rtrDiagnosticReport) error {
+	return writeJSONFile(filepath.Join(dir, "rtr-diagnostic-report.json"), report)
+}
+
+func writeRTRDestination(path string, dst rtrDestinationRecord) error {
+	return writeJSONFile(path, dst)
+}
+
+func writeJSONFile(path string, v any) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0777); err != nil {
+		return err
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	enc := json.NewEncoder(f)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(v); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+func waitRTRDestination(ctx context.Context, path string, timeout time.Duration) (rtrDestinationRecord, rdma.Destination, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	for {
+		record, dst, err := readRTRDestination(path)
+		if err == nil {
+			return record, dst, nil
+		}
+		if !errorsIsNotExist(err) {
+			return rtrDestinationRecord{}, rdma.Destination{}, err
+		}
+		timer := time.NewTimer(100 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return rtrDestinationRecord{}, rdma.Destination{}, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func errorsIsNotExist(err error) bool {
+	return os.IsNotExist(err)
+}
+
+func readRTRDestination(path string) (rtrDestinationRecord, rdma.Destination, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return rtrDestinationRecord{}, rdma.Destination{}, err
+	}
+	defer f.Close()
+	var record rtrDestinationRecord
+	if err := json.NewDecoder(f).Decode(&record); err != nil {
+		return rtrDestinationRecord{}, rdma.Destination{}, fmt.Errorf("read peer destination: %w", err)
+	}
+	dst, err := record.destination()
+	if err != nil {
+		return rtrDestinationRecord{}, rdma.Destination{}, err
+	}
+	return record, dst, nil
+}
+
+func newRTRDestinationRecord(device, routeInterface string, dst rdma.Destination) rtrDestinationRecord {
+	return rtrDestinationRecord{
+		Device:         device,
+		RouteInterface: routeInterface,
+		LID:            dst.LID,
+		QPN:            dst.QPN,
+		PSN:            dst.PSN,
+		GIDIndex:       dst.GIDIndex,
+		GID:            formatGID(dst.GID),
+		GeneratedAt:    time.Now().UTC(),
+	}
+}
+
+func (r rtrDestinationRecord) destination() (rdma.Destination, error) {
+	if r.QPN == 0 {
+		return rdma.Destination{}, fmt.Errorf("peer destination qpn is zero")
+	}
+	addr, err := netip.ParseAddr(r.GID)
+	if err != nil {
+		return rdma.Destination{}, fmt.Errorf("parse peer gid: %w", err)
+	}
+	return rdma.Destination{
+		LID:      r.LID,
+		QPN:      r.QPN,
+		PSN:      r.PSN,
+		GIDIndex: r.GIDIndex,
+		GID:      addr.As16(),
+	}, nil
+}
+
+func formatRTRDiagnostic(out io.Writer, report rtrDiagnosticReport) {
+	fmt.Fprintf(out, "rdma rtr diagnostic state=%s device=%s route_interface=%s peer_route_interface=%s mask=%s local_lid=%d local_qpn=%d local_psn=%d local_gid_index=%d local_gid=%s remote_lid=%d remote_qpn=%d remote_psn=%d remote_gid_index=%d remote_gid=%s work_requests=false ready_to_send=false datapath_claim=false\n",
+		report.State, report.Device, report.RouteInterface, report.PeerRouteInterface,
+		report.Transition.MaskHex, report.Local.LID, report.Local.QPN, report.Local.PSN,
+		report.Local.GIDIndex, report.Local.GID, report.Remote.LID, report.Remote.QPN,
+		report.Remote.PSN, report.Remote.GIDIndex, report.Remote.GID)
+	if report.Error != "" {
+		fmt.Fprintf(out, "rdma rtr diagnostic error=%q\n", report.Error)
+	}
+	if report.IndexZeroRoute {
+		fmt.Fprintln(out, "rdma rtr diagnostic warning=local_selected_gid_index_zero")
+	}
 }
 
 func formatGID(gid [16]byte) string {

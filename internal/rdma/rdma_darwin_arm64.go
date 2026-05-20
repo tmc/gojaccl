@@ -12,6 +12,7 @@ import (
 	"unsafe"
 
 	applerdma "github.com/tmc/apple/rdma"
+	xrdma "github.com/tmc/apple/x/rdma"
 )
 
 func Available() bool {
@@ -296,7 +297,7 @@ func ReadyToReceive(qp *QueuePair, local, remote Destination) error {
 		attr.AHAttr.GRH.DGID = applerdma.IbvGID(remote.GID)
 		attr.AHAttr.GRH.SGIDIndex = uint8(gidIndex)
 	}
-	mask := applerdma.IBV_QP_STATE | applerdma.IBV_QP_AV | applerdma.IBV_QP_PATH_MTU | applerdma.IBV_QP_DEST_QPN | applerdma.IBV_QP_RQ_PSN
+	mask := ReadyToReceiveMask()
 	return modifyQueuePair(qp, &attr, mask, "RTR")
 }
 
@@ -315,12 +316,16 @@ func ReadyToSend(qp *QueuePair, psn uint32) error {
 func modifyQueuePair(qp *QueuePair, attr *applerdma.IbvQPAttr, mask int, state string) error {
 	rc, err := applerdma.Ibv_modify_qp(applerdma.RDMAQP(qp.handle), uintptr(unsafe.Pointer(attr)), mask)
 	if err != nil {
-		return fmt.Errorf("change queue pair to %s: %w", state, err)
+		return fmt.Errorf("change queue pair to %s: %w mask=0x%x", state, err, mask)
 	}
 	if rc != 0 {
-		return fmt.Errorf("change queue pair to %s: errno %d", state, rc)
+		return fmt.Errorf("change queue pair to %s: %s mask=0x%x", state, xrdma.ErrnoText(rc), mask)
 	}
 	return nil
+}
+
+func ReadyToReceiveMask() int {
+	return applerdma.IBV_QP_STATE | applerdma.IBV_QP_AV | applerdma.IBV_QP_PATH_MTU | applerdma.IBV_QP_DEST_QPN | applerdma.IBV_QP_RQ_PSN
 }
 
 func localPortGID(qp *QueuePair) (applerdma.IbvPortAttr, applerdma.IbvGID, int, error) {

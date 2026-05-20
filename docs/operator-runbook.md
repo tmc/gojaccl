@@ -126,6 +126,36 @@ go run ./cmd/jacclproof rdma-init \
 This proves the local RESET-to-INIT QP transition on both hosts. It still does
 not attempt RTR, RTS, completion polling, or datapath work requests.
 
+## RTR Provider Diagnostic
+
+After metadata, allocation, and INIT-only packets have passed, use
+`jacclctl rdma-rtr-diagnostic` when the only useful remaining question is the
+provider's INIT-to-RTR behavior. This is not a daemon proof and not a datapath
+claim. It allocates a protection domain, completion queue, and queue pair,
+transitions RESET-to-INIT, writes local QP destination metadata, waits for peer
+destination metadata supplied out of band, then attempts INIT-to-RTR once.
+
+The command refuses unless both `-allow-rtr` and
+`JACCLCTL_RDMA_RTR_DIAGNOSTIC_ONE_SHOT=one-shot-rtr` are set:
+
+```sh
+JACCLCTL_RDMA_RTR_DIAGNOSTIC_ONE_SHOT=one-shot-rtr \
+  jacclctl rdma-rtr-diagnostic \
+  -device rdma_en3 \
+  -route-interface en0 \
+  -peer-route-interface en0 \
+  -artifact /tmp/gojaccl-rtr-diag-local \
+  -peer-destination /tmp/gojaccl-rtr-diag-local/peer-destination.json \
+  -allow-rtr
+```
+
+Run the same command on the peer with its own artifact directory. Copy each
+host's `local-destination.json` to the other host's `peer-destination.json`
+while both commands are waiting. The final
+`rtr-diagnostic-report.json` records device, route-interface labels, LID, QPN,
+PSN, GID index, GID value, the RTR transition mask, and the provider error. It
+does not call RTS or post send, receive, or write work requests.
+
 For any new hardware path, collect provider port and GID metadata before any
 RTR attempt:
 

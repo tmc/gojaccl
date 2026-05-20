@@ -215,6 +215,22 @@ func TestRTRUsesDynamicSourceGIDIndex(t *testing.T) {
 	}
 }
 
+func TestModifyQueuePairFormatsErrnoName(t *testing.T) {
+	data, err := os.ReadFile("rdma_darwin_arm64.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := sourceBetween(t, string(data), "func modifyQueuePair(", "\nfunc ReadyToReceiveMask(")
+	for _, want := range []string{
+		"xrdma.ErrnoText(rc)",
+		"mask=0x%x",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("modifyQueuePair missing %q in:\n%s", want, body)
+		}
+	}
+}
+
 func sourceBetween(t *testing.T, src, start, end string) string {
 	t.Helper()
 	i := strings.Index(src, start)
