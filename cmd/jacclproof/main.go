@@ -68,7 +68,7 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "       jacclproof rdma-metadata -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
 	fmt.Fprintln(w, "       jacclproof rdma-alloc -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
 	fmt.Fprintln(w, "       jacclproof rdma-init -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
-	fmt.Fprintln(w, "       jacclproof rdma-soak -device rdma_en1")
+	fmt.Fprintln(w, "       jacclproof rdma-soak -device rdma_en1 [-remote-device rdma_en1]")
 	fmt.Fprintln(w, "       jacclproof topology -file devices.json")
 }
 
@@ -93,8 +93,10 @@ func runProcessSnapshot(args []string, stdout io.Writer) error {
 const rdmaEn1SoakRefusal = `refusing to run
 
 Set CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak only after both physical hosts
-are connected on the documented rdma_en1 path and the operator has approved a
-one-shot soak. This command starts jaccld, transitions queue pairs to RTR, runs
+are connected on the requested RDMA path and the operator has approved a
+one-shot soak. The reviewed proof envelope remains the documented rdma_en1
+path; other explicit device/interface combinations are exploratory hardware
+packets. This command starts jaccld, transitions queue pairs to RTR, runs
 daemon-backed smoke, and posts same-data-QP maintenance. Do not loop or retry
 after timeout, nonzero exit, provider degradation, maintenance failure, or
 process wedge.

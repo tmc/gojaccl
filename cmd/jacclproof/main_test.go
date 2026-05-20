@@ -66,6 +66,7 @@ func TestRDMASoakRefusesWithoutConfirmation(t *testing.T) {
 	for _, want := range []string{
 		"refusing to run",
 		"CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak",
+		"explicit device/interface combinations are exploratory",
 		"same-data-QP maintenance",
 	} {
 		if !strings.Contains(got, want) {
@@ -308,6 +309,113 @@ func TestRDMASoakOptionsRequireReviewedCadence(t *testing.T) {
 	opts.SoakInterval = 30
 	if err := validateSoakOptions(opts); err == nil || !strings.Contains(err.Error(), "must remain 60") {
 		t.Fatalf("validateSoakOptions = %v, want reviewed interval error", err)
+	}
+}
+
+func TestRDMASoakOptionsSupportAsymmetricExplicitDevices(t *testing.T) {
+	opts, err := parseSoakOptions([]string{
+		"-device", "rdma_en3",
+		"-remote-device", "rdma_en1",
+		"-remote", "peer",
+		"-remote-tmp", "/tmp",
+		"-local-rdma-ip", "10.0.0.2",
+		"-remote-rdma-ip", "10.0.0.1",
+		"-local-route-interface", "en0",
+		"-remote-route-interface", "en0",
+		"-expected-selected-gid-index", "0",
+	}, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opts.Device != "rdma_en3" || opts.RemoteDevice != "rdma_en1" {
+		t.Fatalf("devices = %q/%q, want rdma_en3/rdma_en1", opts.Device, opts.RemoteDevice)
+	}
+	if opts.LocalRouteIface != "en0" || opts.RemoteRouteIface != "en0" {
+		t.Fatalf("route interfaces = %q/%q, want en0/en0", opts.LocalRouteIface, opts.RemoteRouteIface)
+	}
+	if err := validateSoakOptions(opts); err != nil {
+		t.Fatalf("validateSoakOptions = %v", err)
+	}
+}
+
+func TestRDMASoakPostflightUsesRemoteDevice(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("soak.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	if !strings.Contains(text, `"exit-remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.RemoteDevice)`) {
+		t.Fatal("exit remote ibv postflight must use RemoteDevice")
+	}
+	if strings.Contains(text, `"exit-remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.Device)`) {
+		t.Fatal("exit remote ibv postflight must not use local Device")
+	}
+}
+
+func TestRDMASoakEarlyIPCStopReasonIncludesRTRLine(t *testing.T) {
+	dir := t.TempDir()
+	logDir := filepath.Join(dir, "logs")
+	if err := os.Mkdir(logDir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	log := strings.Join([]string{
+		`2026/05/19 23:53:11 jaccld phase=rtr start peer=1`,
+		`2026/05/19 23:53:12 peer 1: change queue pair to RTR: errno 60`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(logDir, "jaccld-rank0.log"), []byte(log), 0666); err != nil {
+		t.Fatal(err)
+	}
+	reason := earlyIPCStopReason(dir)
+	if !strings.Contains(reason, "daemon stopped before ipc_listen: rank0:") ||
+		!strings.Contains(reason, "change queue pair to RTR: errno 60") {
+		t.Fatalf("earlyIPCStopReason = %q", reason)
+	}
+}
+
+func TestRDMASoakFinalSummaryIncludesRemoteScope(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"proof", "logs", "maintenance"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := soakRun{
+		opts: soakOptions{
+			Artifact:         dir,
+			Device:           "rdma_en2",
+			RemoteDevice:     "rdma_en3",
+			LocalRDMAIP:      "10.0.0.2",
+			RemoteRDMAIP:     "10.0.0.3",
+			LocalRouteIface:  "en2",
+			RemoteRouteIface: "en3",
+			SoakSeconds:      7200,
+			SoakInterval:     60,
+		},
+		remoteArt:   "/tmp/remote-art",
+		coordinator: "10.0.0.3:39311",
+		head:        "abc123",
+	}
+	if _, _, err := run.packageArtifact("stopped_pending_review"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "proof", "final-summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var summary map[string]any
+	if err := json.Unmarshal(data, &summary); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"device":                 "rdma_en2",
+		"remote_device":          "rdma_en3",
+		"local_route_interface":  "en2",
+		"remote_route_interface": "en3",
+	} {
+		if got, _ := summary[key].(string); got != want {
+			t.Fatalf("summary[%s] = %q, want %q", key, got, want)
+		}
 	}
 }
 

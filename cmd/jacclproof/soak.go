@@ -19,6 +19,7 @@ import (
 
 type soakOptions struct {
 	Device           string
+	RemoteDevice     string
 	Remote           string
 	RemoteTmp        string
 	Root             string
@@ -26,6 +27,8 @@ type soakOptions struct {
 	Stamp            string
 	LocalRDMAIP      string
 	RemoteRDMAIP     string
+	LocalRouteIface  string
+	RemoteRouteIface string
 	CoordinatorPort  int
 	SoakSeconds      int
 	SoakInterval     int
@@ -50,9 +53,6 @@ func runRDMASoakPacket(args []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if opts.Device != "rdma_en1" {
-		return exitError{code: 2, err: fmt.Errorf("unsupported rdma soak device %q", opts.Device)}
-	}
 	if os.Getenv("CONFIRM_RDMA_EN1_SOAK_ONE_SHOT") != "one-shot-soak" {
 		fmt.Fprint(stderr, rdmaEn1SoakRefusal)
 		return exitError{code: 2}
@@ -68,6 +68,7 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 	fs := flag.NewFlagSet("rdma-soak", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	device := fs.String("device", getenv("DEVICE", "rdma_en1"), "RDMA device")
+	remoteDevice := fs.String("remote-device", getenv("REMOTE_DEVICE", ""), "remote RDMA device; defaults to -device")
 	remote := fs.String("remote", os.Getenv("REMOTE"), "peer SSH target")
 	remoteTmp := fs.String("remote-tmp", os.Getenv("REMOTE_TMP"), "peer writable artifact directory")
 	root := fs.String("root", os.Getenv("ROOT"), "repository root")
@@ -75,6 +76,8 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 	stamp := fs.String("stamp", os.Getenv("STAMP"), "UTC artifact stamp")
 	localIP := fs.String("local-rdma-ip", os.Getenv("LOCAL_RDMA_IP"), "local RDMA tcpchan address")
 	remoteIP := fs.String("remote-rdma-ip", os.Getenv("REMOTE_RDMA_IP"), "remote RDMA tcpchan address")
+	localRouteIface := fs.String("local-route-interface", getenv("LOCAL_ROUTE_INTERFACE", "en1"), "required local route interface")
+	remoteRouteIface := fs.String("remote-route-interface", getenv("REMOTE_ROUTE_INTERFACE", "en1"), "required remote route interface")
 	coordPort := fs.Int("coord-port", getenvInt("COORD_PORT", 39311), "coordinator TCP port")
 	soakSeconds := fs.Int("soak-seconds", getenvInt("SOAK_SECONDS", 7200), "soak duration in seconds")
 	interval := fs.Int("soak-interval", getenvInt("SOAK_INTERVAL_SECONDS", 60), "maintenance interval in seconds")
@@ -87,6 +90,9 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 	}
 	if fs.NArg() != 0 {
 		return soakOptions{}, exitError{code: 2, err: fmt.Errorf("unexpected rdma-soak arguments")}
+	}
+	if *remoteDevice == "" {
+		*remoteDevice = *device
 	}
 	if *stamp == "" {
 		*stamp = time.Now().UTC().Format("20060102T150405Z")
@@ -107,6 +113,7 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 	}
 	return soakOptions{
 		Device:           *device,
+		RemoteDevice:     *remoteDevice,
 		Remote:           *remote,
 		RemoteTmp:        *remoteTmp,
 		Root:             *root,
@@ -114,6 +121,8 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 		Stamp:            *stamp,
 		LocalRDMAIP:      *localIP,
 		RemoteRDMAIP:     *remoteIP,
+		LocalRouteIface:  *localRouteIface,
+		RemoteRouteIface: *remoteRouteIface,
 		CoordinatorPort:  *coordPort,
 		SoakSeconds:      *soakSeconds,
 		SoakInterval:     *interval,
@@ -125,6 +134,12 @@ func parseSoakOptions(args []string, stderr io.Writer) (soakOptions, error) {
 }
 
 func validateSoakOptions(opts soakOptions) error {
+	if _, err := metadataProfileForDevice(opts.Device); err != nil {
+		return err
+	}
+	if _, err := metadataProfileForDevice(opts.RemoteDevice); err != nil {
+		return fmt.Errorf("remote-device: %w", err)
+	}
 	if opts.Remote == "" {
 		return fmt.Errorf("remote is required")
 	}
@@ -136,6 +151,12 @@ func validateSoakOptions(opts soakOptions) error {
 	}
 	if opts.RemoteRDMAIP == "" {
 		return fmt.Errorf("remote-rdma-ip is required")
+	}
+	if strings.TrimSpace(opts.LocalRouteIface) == "" {
+		return fmt.Errorf("local-route-interface is required")
+	}
+	if strings.TrimSpace(opts.RemoteRouteIface) == "" {
+		return fmt.Errorf("remote-route-interface is required")
 	}
 	if opts.CoordinatorPort <= 0 || opts.CoordinatorPort > 65535 {
 		return fmt.Errorf("coord-port %d out of range", opts.CoordinatorPort)
@@ -225,18 +246,21 @@ func (r *soakRun) init() error {
 - artifact: %s
 - remote_artifact: %s
 - device: %s
+- remote_device: %s
 - local_rdma_ip: %s
 - remote_rdma_ip: %s
+- local_route_interface: %s
+- remote_route_interface: %s
 - coordinator: %s
 - soak_seconds: %d
 - soak_interval_seconds: %d
 - soak_rounds: %d
 - no_retry: one-shot; stop on first required gate failure
-`, r.opts.Device, r.head, r.opts.Artifact, r.remoteArt, r.opts.Device, r.opts.LocalRDMAIP, r.opts.RemoteRDMAIP, r.coordinator, r.opts.SoakSeconds, r.opts.SoakInterval, r.soakRounds())
+`, r.opts.Device, r.head, r.opts.Artifact, r.remoteArt, r.opts.Device, r.opts.RemoteDevice, r.opts.LocalRDMAIP, r.opts.RemoteRDMAIP, r.opts.LocalRouteIface, r.opts.RemoteRouteIface, r.coordinator, r.opts.SoakSeconds, r.opts.SoakInterval, r.soakRounds())
 	if err := os.WriteFile(filepath.Join(r.opts.Artifact, "README.md"), []byte(readme), 0666); err != nil {
 		return fmt.Errorf("write README: %w", err)
 	}
-	noRetry := "NO_RETRY: one-shot rdma_en1 soak. No retry after safe-gate/hash/metadata/route/tcpdiag/provider/RTR/CQ/smoke/maintenance/postflight/cleanup failure.\n"
+	noRetry := fmt.Sprintf("NO_RETRY: one-shot soak local %s remote %s. No retry after safe-gate/hash/metadata/route/tcpdiag/provider/RTR/CQ/smoke/maintenance/postflight/cleanup failure.\n", r.opts.Device, r.opts.RemoteDevice)
 	if err := os.WriteFile(filepath.Join(r.opts.Artifact, "proof", "no-retry.txt"), []byte(noRetry), 0666); err != nil {
 		return fmt.Errorf("write no-retry: %w", err)
 	}
@@ -251,10 +275,10 @@ func (r *soakRun) runSafeGates() error {
 	dir := filepath.Join(r.opts.Artifact, "safe")
 	r.capture(dir, "git-status", 0, "git", "status", "--short")
 	r.capture(dir, "git-head", 0, "git", "rev-parse", "HEAD")
-	r.capture(dir, "go-test", r.opts.CommandTimeout, "go", "test", "-count=1", "./...")
-	r.capture(dir, "cgo0-go-test", r.opts.CommandTimeout, "env", "CGO_ENABLED=0", "go", "test", "-count=1", "./...")
-	r.capture(dir, "cgo0-go-vet", r.opts.CommandTimeout, "env", "CGO_ENABLED=0", "go", "vet", "./...")
-	r.capture(dir, "cgo0-go-race", r.opts.CommandTimeout, "env", "CGO_ENABLED=0", "go", "test", "-race", "-count=1", "./...")
+	r.capture(dir, "go-test", r.opts.CommandTimeout, "env", "-u", "CONFIRM_RDMA_EN1_SOAK_ONE_SHOT", "go", "test", "-count=1", "./...")
+	r.capture(dir, "cgo0-go-test", r.opts.CommandTimeout, "env", "-u", "CONFIRM_RDMA_EN1_SOAK_ONE_SHOT", "CGO_ENABLED=0", "go", "test", "-count=1", "./...")
+	r.capture(dir, "cgo0-go-vet", r.opts.CommandTimeout, "env", "-u", "CONFIRM_RDMA_EN1_SOAK_ONE_SHOT", "CGO_ENABLED=0", "go", "vet", "./...")
+	r.capture(dir, "cgo0-go-race", r.opts.CommandTimeout, "env", "-u", "CONFIRM_RDMA_EN1_SOAK_ONE_SHOT", "CGO_ENABLED=0", "go", "test", "-race", "-count=1", "./...")
 	r.capture(dir, "diff-check", 0, "git", "diff", "--check")
 	r.capture(dir, "diff-integration", 0, "git", "diff", "--", "integration_test.go")
 	r.capture(dir, "diff-allow-rtr", 0, "git", "diff", "-GALLOW_RTR|JACCL_TEST_RDMA_ALLOW_RTR", "--", ".")
@@ -322,17 +346,18 @@ func (r *soakRun) preflight() error {
 	if err := r.requireZero("remote route", filepath.Join(dir, "remote-route.status")); err != nil {
 		return err
 	}
-	if !fileContains(filepath.Join(dir, "local-route.out"), "interface: en1") {
-		return r.stop("local route not en1")
+	if !fileContains(filepath.Join(dir, "local-route.out"), "interface: "+r.opts.LocalRouteIface) {
+		return r.stop("local route not " + r.opts.LocalRouteIface)
 	}
-	if !fileContains(filepath.Join(dir, "remote-route.out"), "interface: en1") {
-		return r.stop("remote route not en1")
+	if !fileContains(filepath.Join(dir, "remote-route.out"), "interface: "+r.opts.RemoteRouteIface) {
+		return r.stop("remote route not " + r.opts.RemoteRouteIface)
 	}
-	metaArt := filepath.Join(dir, "rdma-en1-metadata")
+	metaArt := filepath.Join(dir, artifactDeviceName(r.opts.Device)+"-metadata")
 	args := []string{
 		filepath.Join(r.opts.Artifact, "bin", "jacclproof"),
 		"rdma-metadata",
 		"-device", r.opts.Device,
+		"-remote-device", r.opts.RemoteDevice,
 		"-remote", r.opts.Remote,
 		"-remote-tmp", r.opts.RemoteTmp,
 		"-art", metaArt,
@@ -424,7 +449,7 @@ wait "$pid"
 st=$?
 echo "$st" >"$EXITFILE"
 exit "$st"
-`, shellQuote(r.remoteArt), shellQuote(r.opts.Device), shellQuote(r.coordinator))
+`, shellQuote(r.remoteArt), shellQuote(r.opts.RemoteDevice), shellQuote(r.coordinator))
 	if err := os.WriteFile(filepath.Join(dir, "rank1-wrapper.sh"), []byte(rank1), 0777); err != nil {
 		return err
 	}
@@ -483,6 +508,9 @@ func (r *soakRun) postIPCLivenessGate() error {
 	}
 	_ = os.WriteFile(filepath.Join(r.opts.Artifact, "supervisor", "ipc-listen-wait-ok.marker"), []byte(marker), 0666)
 	if !ok {
+		if reason := earlyIPCStopReason(r.opts.Artifact); reason != "" {
+			return r.stop(reason)
+		}
 		return r.stop("ipc_listen wait failed")
 	}
 	pid := strings.TrimSpace(readFile(filepath.Join(r.opts.Artifact, "logs", "jaccld-rank1.pid")))
@@ -519,7 +547,7 @@ func (r *soakRun) smokePair(label string) error {
 		"JACCL_TEST_RANK=0",
 		"JACCL_TEST_SIZE=2",
 		"JACCL_TEST_COORDINATOR=" + r.coordinator,
-		"JACCL_TEST_RDMA_DEVICE=" + r.opts.Device,
+		"JACCL_TEST_RDMA_DEVICE=" + r.opts.RemoteDevice,
 		"JACCL_TEST_OP=barrier-sum",
 	}
 	remoteCmd := "cd " + shellQuote(filepath.Join(r.remoteArt, "bin")) + " && env " + joinShellArgs(remoteEnv) + " perl -e 'alarm shift; exec @ARGV' " + strconv.Itoa(int(r.opts.CommandTimeout/time.Second)) + " ./gojaccl.test -test.run '^TestIntegrationChild$' -test.v"
@@ -612,7 +640,7 @@ func (r *soakRun) postflightAndCleanup() error {
 	r.capture(dir, "local-rdma", 40*time.Second, "rdma_ctl", "status")
 	r.capture(dir, "local-ibv", 40*time.Second, "ibv_devinfo", "-d", r.opts.Device)
 	r.remoteCapture(dir, "remote-rdma", "perl -e 'alarm shift; exec @ARGV' 40 rdma_ctl status")
-	r.remoteCapture(dir, "remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.Device))
+	r.remoteCapture(dir, "remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.RemoteDevice))
 	for _, name := range []string{"local-rdma", "local-ibv", "remote-rdma", "remote-ibv"} {
 		if err := r.requireZero(name, filepath.Join(dir, name+".status")); err != nil {
 			return err
@@ -753,7 +781,7 @@ func (r *soakRun) onExit(status int) {
 		r.capture(dir, "exit-local-rdma", 40*time.Second, "rdma_ctl", "status")
 		r.capture(dir, "exit-local-ibv", 40*time.Second, "ibv_devinfo", "-d", r.opts.Device)
 		r.remoteCapture(dir, "exit-remote-rdma", "perl -e 'alarm shift; exec @ARGV' 40 rdma_ctl status")
-		r.remoteCapture(dir, "exit-remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.Device))
+		r.remoteCapture(dir, "exit-remote-ibv", "perl -e 'alarm shift; exec @ARGV' 40 ibv_devinfo -d "+shellQuote(r.opts.RemoteDevice))
 		r.cleanupDaemons()
 		r.started = false
 		time.Sleep(3 * time.Second)
@@ -780,8 +808,11 @@ func (r *soakRun) packageArtifact(state string) (string, string, error) {
 		Artifact                 string `json:"artifact"`
 		RemoteArtifact           string `json:"remote_artifact"`
 		Device                   string `json:"device"`
+		RemoteDevice             string `json:"remote_device"`
 		LocalIP                  string `json:"local_ip"`
 		RemoteIP                 string `json:"remote_ip"`
+		LocalRouteInterface      string `json:"local_route_interface"`
+		RemoteRouteInterface     string `json:"remote_route_interface"`
 		Coordinator              string `json:"coordinator"`
 		SoakSeconds              int    `json:"soak_seconds"`
 		SoakIntervalSeconds      int    `json:"soak_interval_seconds"`
@@ -795,8 +826,11 @@ func (r *soakRun) packageArtifact(state string) (string, string, error) {
 		Artifact:                 r.opts.Artifact,
 		RemoteArtifact:           r.remoteArt,
 		Device:                   r.opts.Device,
+		RemoteDevice:             r.opts.RemoteDevice,
 		LocalIP:                  r.opts.LocalRDMAIP,
 		RemoteIP:                 r.opts.RemoteRDMAIP,
+		LocalRouteInterface:      r.opts.LocalRouteIface,
+		RemoteRouteInterface:     r.opts.RemoteRouteIface,
 		Coordinator:              r.coordinator,
 		SoakSeconds:              r.opts.SoakSeconds,
 		SoakIntervalSeconds:      r.opts.SoakInterval,
@@ -977,12 +1011,40 @@ func writeTailFrom(src string, skip int, dst string) {
 }
 
 var (
-	ipcLogStopRE         = regexp.MustCompile(`(?i)panic|fatal|provider error|rtr error|cq error|poison|maintenance error`)
+	ipcLogStopRE         = regexp.MustCompile(`(?i)panic|fatal|provider error|rtr error|change queue pair to RTR|cq error|poison|maintenance error`)
 	maintenanceLogStopRE = regexp.MustCompile(`(?i)ok=false|poison|unexpected completion|provider error|rtr error|cq error|maintenance .*err|daemon maintenance .*err|panic|fatal`)
 )
 
 func logHasStopMarker(path string) bool {
 	return ipcLogStopRE.MatchString(readFile(path))
+}
+
+func earlyIPCStopReason(artifact string) string {
+	for _, entry := range []struct {
+		rank string
+		path string
+	}{
+		{"rank0", filepath.Join(artifact, "logs", "jaccld-rank0.log")},
+		{"rank1", filepath.Join(artifact, "logs", "jaccld-rank1.log")},
+	} {
+		line := firstLogStopMarkerLine(entry.path)
+		if line != "" {
+			return "daemon stopped before ipc_listen: " + entry.rank + ": " + line
+		}
+	}
+	return ""
+}
+
+func firstLogStopMarkerLine(path string) string {
+	data := readFile(path)
+	scan := bufio.NewScanner(strings.NewReader(data))
+	for scan.Scan() {
+		line := scan.Text()
+		if ipcLogStopRE.MatchString(line) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 func maintenanceLogHasStopMarker(path string) bool {
