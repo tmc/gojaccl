@@ -37,6 +37,49 @@ ibv_devinfo -d rdma_en1
 The port used by the proof was `rdma_en1` and had to be active before daemon
 startup. If the provider is not active, stop before launching daemon ranks.
 
+### Two M4s with two Thunderbolt cables
+
+This is a two-rank proof shape. Do not synthesize a third rank or reuse the
+three-host line plan when only two physical hosts are present.
+
+Generate the candidate device matrix before collecting hardware evidence:
+
+```sh
+go run ./cmd/jacclproof devices \
+  -ranks 2 \
+  -devices rdma_en1,rdma_en3 \
+  > /tmp/gojaccl-two-m4-devices.json
+
+go run ./cmd/jacclproof topology -file /tmp/gojaccl-two-m4-devices.json
+```
+
+The topology command is provider-free. Its `devices` field records every device
+named in the matrix, while `primary_devices` records the first usable device on
+each directed edge. The direct backend opens that first device per peer edge.
+Therefore a two-cable matrix is evidence that the operator intended both cables
+to be present, not proof that one datapath run used both cables.
+
+Collect metadata for both cable-backed RDMA devices before any RTR attempt:
+
+```sh
+CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
+  go run ./cmd/jacclproof rdma-metadata \
+    -device rdma_en1 \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir> \
+    -expected-selected-gid-index 1
+
+CONFIRM_RDMA_EN3_METADATA_ONE_SHOT=one-shot-metadata \
+  go run ./cmd/jacclproof rdma-metadata \
+    -device rdma_en3 \
+    -remote <peer-ssh> \
+    -remote-tmp <peer-tmp-dir>
+```
+
+Treat `rdma_en3` as metadata-only until a separate reviewed datapath packet is
+added. The reviewed long-idle datapath packet remains `rdma-soak` on
+`rdma_en1`.
+
 For any new hardware path, collect provider port and GID metadata before any
 RTR attempt:
 

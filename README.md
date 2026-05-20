@@ -96,6 +96,25 @@ coordinator, allocate queue pairs, or authorize RTR.
 macOS Thunderbolt RDMA provider failures can leave uninterruptible processes, so
 do not run the RTR gate casually.
 
+For the current two-M4 setup, do not model a missing third host. Generate an
+explicit two-rank matrix for the cables that are physically connected:
+
+```sh
+go run ./cmd/jacclproof devices \
+  -ranks 2 \
+  -devices rdma_en1,rdma_en3 \
+  > /tmp/gojaccl-two-m4-devices.json
+
+go run ./cmd/jacclproof topology -file /tmp/gojaccl-two-m4-devices.json
+```
+
+The topology report lists both `devices` and `primary_devices`. The direct
+backend currently opens the first usable device listed for each peer edge, so a
+dual-cable matrix is useful topology evidence but not a claim that both cables
+carried datapath traffic in one run. Use separate metadata packets for each
+device and keep the reviewed soak on the explicit `rdma_en1` proof path unless
+a new proof envelope is written.
+
 The current hardware proof mode starts a static daemon rank with explicit rank
 metadata:
 
