@@ -76,34 +76,55 @@ to be present, not proof that one datapath run used both cables.
 Collect metadata for both cable-backed RDMA devices before any RTR attempt:
 
 ```sh
-CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
-  go run ./cmd/jacclproof rdma-metadata \
-    -device rdma_en1 \
-    -remote <peer-ssh> \
-    -remote-tmp <peer-tmp-dir> \
-    -expected-selected-gid-index 1
+go run ./cmd/jacclproof rdma-metadata \
+  -device rdma_en1 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir> \
+  -expected-selected-gid-index 1
 
-CONFIRM_RDMA_EN3_METADATA_ONE_SHOT=one-shot-metadata \
-  go run ./cmd/jacclproof rdma-metadata \
-    -device rdma_en3 \
-    -remote <peer-ssh> \
-    -remote-tmp <peer-tmp-dir>
+go run ./cmd/jacclproof rdma-metadata \
+  -device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
 ```
 
 For asymmetric device names, run the metadata packet with `-remote-device`:
 
 ```sh
-CONFIRM_RDMA_EN2_METADATA_ONE_SHOT=one-shot-metadata \
-  go run ./cmd/jacclproof rdma-metadata \
-    -device rdma_en2 \
-    -remote-device rdma_en3 \
-    -remote <peer-ssh> \
-    -remote-tmp <peer-tmp-dir>
+go run ./cmd/jacclproof rdma-metadata \
+  -device rdma_en2 \
+  -remote-device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
 ```
 
-Treat `rdma_en3` as metadata-only until a separate reviewed datapath packet is
-added. The reviewed long-idle datapath packet remains `rdma-soak` on
-`rdma_en1`.
+After metadata, run the allocation packet to prove provider resource creation
+without RTR:
+
+```sh
+go run ./cmd/jacclproof rdma-alloc \
+  -device rdma_en2 \
+  -remote-device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
+```
+
+This allocates and tears down PD/MR/CQ/QP resources on both hosts. Treat
+`rdma_en3` as no-datapath until a separate reviewed datapath packet is added.
+The reviewed long-idle datapath packet remains `rdma-soak` on `rdma_en1`.
+
+After allocation passes, run the INIT-only packet before any RTR attempt:
+
+```sh
+go run ./cmd/jacclproof rdma-init \
+  -device rdma_en2 \
+  -remote-device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
+```
+
+This proves the local RESET-to-INIT QP transition on both hosts. It still does
+not attempt RTR, RTS, completion polling, or datapath work requests.
 
 For any new hardware path, collect provider port and GID metadata before any
 RTR attempt:
@@ -150,16 +171,15 @@ For this configuration, run metadata preflight with
 `EXPECTED_SELECTED_GID_INDEX=1` and stop before daemon startup if either host
 lacks the IPv4-mapped GID at index 1.
 
-For the current post-reboot `rdma_en1` `errno 60` state, use the gated
-metadata packet:
+For the current post-reboot `rdma_en1` `errno 60` state, use the metadata
+packet:
 
 ```sh
-CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
-  go run ./cmd/jacclproof rdma-metadata \
-    -device rdma_en1 \
-    -remote <peer-ssh> \
-    -remote-tmp <peer-tmp-dir> \
-    -expected-selected-gid-index 1
+go run ./cmd/jacclproof rdma-metadata \
+  -device rdma_en1 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir> \
+  -expected-selected-gid-index 1
 ```
 
 This packet classifies metadata collection only. It is not a reproof packet and

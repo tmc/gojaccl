@@ -48,6 +48,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return runProcessSnapshot(args[1:], stdout)
 	case "rdma-metadata":
 		return runRDMAMetadataPacket(args[1:], stdout, stderr)
+	case "rdma-alloc":
+		return runRDMAAllocPacket(args[1:], stdout, stderr)
+	case "rdma-init":
+		return runRDMAInitPacket(args[1:], stdout, stderr)
 	case "rdma-soak":
 		return runRDMASoakPacket(args[1:], stdout, stderr)
 	case "topology":
@@ -62,6 +66,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "usage: jacclproof devices [-ranks n] [-shape mesh|ring|line] [-devices rdma_en1,rdma_en3] [-edge src,dst=dev]")
 	fmt.Fprintln(w, "       jacclproof process-snapshot")
 	fmt.Fprintln(w, "       jacclproof rdma-metadata -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
+	fmt.Fprintln(w, "       jacclproof rdma-alloc -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
+	fmt.Fprintln(w, "       jacclproof rdma-init -device rdma_en1|rdma_en2|rdma_en3 -remote user@host -remote-tmp dir")
 	fmt.Fprintln(w, "       jacclproof rdma-soak -device rdma_en1")
 	fmt.Fprintln(w, "       jacclproof topology -file devices.json")
 }
@@ -83,30 +89,6 @@ func runProcessSnapshot(args []string, stdout io.Writer) error {
 	}
 	return nil
 }
-
-const rdmaEn1MetadataRefusal = `refusing to run
-
-Set CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata after both laptops and
-the intended Thunderbolt RDMA cable are connected. This is a one-shot metadata
-packet; do not loop or retry after timeout, nonzero exit, missing output,
-provider-state change, or process wedge.
-`
-
-const rdmaEn2MetadataRefusal = `refusing to run
-
-Set CONFIRM_RDMA_EN2_METADATA_ONE_SHOT=one-shot-metadata after both laptops and
-the intended Thunderbolt RDMA cable are connected. This is a one-shot metadata
-packet; do not loop or retry after timeout, nonzero exit, missing output,
-provider-state change, or process wedge.
-`
-
-const rdmaEn3MetadataRefusal = `refusing to run
-
-Set CONFIRM_RDMA_EN3_METADATA_ONE_SHOT=one-shot-metadata after both laptops and
-the second Thunderbolt cable are connected. This is a one-shot metadata packet;
-do not loop or retry after timeout, nonzero exit, missing output, provider-state
-change, or process wedge.
-`
 
 const rdmaEn1SoakRefusal = `refusing to run
 

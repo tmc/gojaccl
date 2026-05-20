@@ -38,8 +38,6 @@ type metadataProfile struct {
 	device           string
 	defaultMaxGIDs   int
 	defaultTimeout   time.Duration
-	confirmation     string
-	confirmationText string
 	requiresExpected bool
 	rdmaStatusMode   string
 }
@@ -48,10 +46,6 @@ func runRDMAMetadataPacket(args []string, stdout, stderr io.Writer) error {
 	opts, profile, err := parseMetadataOptions(args, stderr)
 	if err != nil {
 		return err
-	}
-	if os.Getenv(profile.confirmation) != "one-shot-metadata" {
-		fmt.Fprint(stderr, profile.confirmationText)
-		return exitError{code: 2}
 	}
 	if err := validateMetadataOptions(opts, profile); err != nil {
 		return exitError{code: 2, err: err}
@@ -136,28 +130,22 @@ func metadataProfileForDevice(device string) (metadataProfile, error) {
 			device:           device,
 			defaultMaxGIDs:   1024,
 			defaultTimeout:   40 * time.Second,
-			confirmation:     "CONFIRM_RDMA_EN1_METADATA_ONE_SHOT",
-			confirmationText: rdmaEn1MetadataRefusal,
 			requiresExpected: true,
 			rdmaStatusMode:   "enabled",
 		}, nil
 	case "rdma_en2":
 		return metadataProfile{
-			device:           device,
-			defaultMaxGIDs:   64,
-			defaultTimeout:   20 * time.Second,
-			confirmation:     "CONFIRM_RDMA_EN2_METADATA_ONE_SHOT",
-			confirmationText: rdmaEn2MetadataRefusal,
-			rdmaStatusMode:   "device-active",
+			device:         device,
+			defaultMaxGIDs: 64,
+			defaultTimeout: 20 * time.Second,
+			rdmaStatusMode: "device-active",
 		}, nil
 	case "rdma_en3":
 		return metadataProfile{
-			device:           device,
-			defaultMaxGIDs:   64,
-			defaultTimeout:   20 * time.Second,
-			confirmation:     "CONFIRM_RDMA_EN3_METADATA_ONE_SHOT",
-			confirmationText: rdmaEn3MetadataRefusal,
-			rdmaStatusMode:   "device-active",
+			device:         device,
+			defaultMaxGIDs: 64,
+			defaultTimeout: 20 * time.Second,
+			rdmaStatusMode: "device-active",
 		}, nil
 	default:
 		return metadataProfile{}, fmt.Errorf("unsupported rdma metadata device %q", device)

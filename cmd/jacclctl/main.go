@@ -2,8 +2,8 @@
 //
 // The stats subcommand reports daemon resource leases and jaccld-observed
 // scarce provider slot counters. The maintain subcommand asks a daemon to run
-// explicit same-data-QP maintenance. The rdma-metadata and tcp-diagnostic
-// subcommands are bounded operator preflights.
+// explicit same-data-QP maintenance. The rdma-metadata, rdma-alloc, rdma-init,
+// and tcp-diagnostic subcommands are bounded operator preflights.
 package main
 
 import (
@@ -38,6 +38,8 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "usage: jacclctl [flags] maintain [-timeout duration]\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] stats [-timeout duration] [-json]\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-metadata -device name\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-alloc -device name\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] rdma-init -device name\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "       jacclctl [flags] tcp-diagnostic (-listen addr | -dial addr)\n")
 		flag.PrintDefaults()
 	}
@@ -63,6 +65,14 @@ func main() {
 		}
 	case "rdma-metadata":
 		if err := runRDMAMetadataCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+	case "rdma-alloc":
+		if err := runRDMAAllocCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
+			log.Fatal(err)
+		}
+	case "rdma-init":
+		if err := runRDMAInitCommand(ctx, flag.Args()[1:], os.Stdout); err != nil {
 			log.Fatal(err)
 		}
 	default:
@@ -194,6 +204,97 @@ func formatRDMAPortInfo(out io.Writer, info rdma.PortInfo) {
 		}
 		fmt.Fprintln(out)
 	}
+}
+
+func runRDMAAllocCommand(ctx context.Context, args []string, out io.Writer) (err error) {
+	return runRDMAResourceCommand(ctx, "rdma-alloc", args, out, false)
+}
+
+func runRDMAInitCommand(ctx context.Context, args []string, out io.Writer) (err error) {
+	return runRDMAResourceCommand(ctx, "rdma-init", args, out, true)
+}
+
+func runRDMAResourceCommand(ctx context.Context, name string, args []string, out io.Writer, initQP bool) (err error) {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(out)
+	device := fs.String("device", "", "RDMA device name")
+	cqCapacity := fs.Int("cq-capacity", 4, "completion queue capacity")
+	mrBytes := fs.Int("mr-bytes", 4096, "mmap-backed memory region size")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 0 {
+		return fmt.Errorf("unexpected %s arguments", name)
+	}
+	if *device == "" {
+		return fmt.Errorf("device is required")
+	}
+	if *cqCapacity <= 0 {
+		return fmt.Errorf("cq-capacity %d must be positive", *cqCapacity)
+	}
+	if *mrBytes <= 0 {
+		return fmt.Errorf("mr-bytes %d must be positive", *mrBytes)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	type cleanup struct {
+		name string
+		fn   func() error
+	}
+	var cleanups []cleanup
+	defer func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			if closeErr := cleanups[i].fn(); closeErr != nil && err == nil {
+				err = fmt.Errorf("close %s: %w", cleanups[i].name, closeErr)
+			}
+		}
+	}()
+
+	dev, err := rdma.OpenDevice(*device)
+	if err != nil {
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"device", dev.Close})
+	pd, err := rdma.NewProtectionDomain(dev)
+	if err != nil {
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"protection domain", pd.Close})
+	cq, err := rdma.NewCompletionQueue(dev, *cqCapacity)
+	if err != nil {
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"completion queue", cq.Close})
+	qp, err := rdma.NewQueuePair(pd, cq)
+	if err != nil {
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"queue pair", qp.Close})
+	mr, err := rdma.NewMemoryRegion(pd, *mrBytes)
+	if err != nil {
+		return err
+	}
+	cleanups = append(cleanups, cleanup{"memory region", mr.Close})
+	if initQP {
+		if err := rdma.InitQueuePair(qp); err != nil {
+			return err
+		}
+	}
+
+	formatRDMAResource(out, name, *device, *cqCapacity, *mrBytes, initQP, qp, mr)
+	return nil
+}
+
+func formatRDMAResource(out io.Writer, command, device string, cqCapacity, mrBytes int, initQP bool, qp *rdma.QueuePair, mr *rdma.MemoryRegion) {
+	qpn := qp.Number()
+	fmt.Fprintf(out, "rdma resource command=%s device=%s cq_capacity=%d mr_bytes=%d qpn=%d qpn_nonzero=%t addr_nonzero=%t lkey_nonzero=%t rkey_nonzero=%t init=%t rtr=false work_requests=false\n",
+		command, device, cqCapacity, mrBytes, qpn, qpn != 0, mr.Addr() != 0, mr.LKey() != 0, mr.RKey() != 0, initQP)
+	fmt.Fprintln(out, "resource protection_domain=allocated")
+	fmt.Fprintln(out, "resource completion_queue=allocated")
+	fmt.Fprintln(out, "resource queue_pair=allocated")
+	fmt.Fprintln(out, "resource memory_region=allocated")
 }
 
 func formatGID(gid [16]byte) string {

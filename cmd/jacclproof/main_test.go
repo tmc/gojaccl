@@ -53,50 +53,24 @@ func TestProcessSnapshotCommandNoMatchesExitsOne(t *testing.T) {
 	}
 }
 
-func TestProofCommandsRefuseWithoutConfirmation(t *testing.T) {
-	tests := []struct {
-		name string
-		args []string
-		want []string
-	}{
-		{
-			name: "en1 metadata",
-			args: []string{"rdma-metadata", "-device", "rdma_en1"},
-			want: []string{"refusing to run", "CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata", "one-shot metadata"},
-		},
-		{
-			name: "en2 metadata",
-			args: []string{"rdma-metadata", "-device", "rdma_en2"},
-			want: []string{"refusing to run", "CONFIRM_RDMA_EN2_METADATA_ONE_SHOT=one-shot-metadata", "one-shot metadata"},
-		},
-		{
-			name: "en3 metadata",
-			args: []string{"rdma-metadata", "-device", "rdma_en3"},
-			want: []string{"refusing to run", "CONFIRM_RDMA_EN3_METADATA_ONE_SHOT=one-shot-metadata", "one-shot metadata"},
-		},
-		{
-			name: "en1 soak",
-			args: []string{"rdma-soak", "-device", "rdma_en1"},
-			want: []string{"refusing to run", "CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak", "same-data-QP maintenance"},
-		},
+func TestRDMASoakRefusesWithoutConfirmation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"rdma-soak", "-device", "rdma_en1"}, &stdout, &stderr)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit code = %d err=%v, want 2", code, err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var stdout, stderr bytes.Buffer
-			err := run(tt.args, &stdout, &stderr)
-			if code := exitCode(err); code != 2 {
-				t.Fatalf("exit code = %d err=%v, want 2", code, err)
-			}
-			if stdout.Len() != 0 {
-				t.Fatalf("stdout = %q, want empty", stdout.String())
-			}
-			got := stderr.String()
-			for _, want := range tt.want {
-				if !strings.Contains(got, want) {
-					t.Fatalf("stderr missing %q in:\n%s", want, got)
-				}
-			}
-		})
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	got := stderr.String()
+	for _, want := range []string{
+		"refusing to run",
+		"CONFIRM_RDMA_EN1_SOAK_ONE_SHOT=one-shot-soak",
+		"same-data-QP maintenance",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("stderr missing %q in:\n%s", want, got)
+		}
 	}
 }
 
@@ -258,10 +232,37 @@ func TestMetadataOptionsPreserveDeviceDefaults(t *testing.T) {
 	}
 }
 
-func TestRDMAMetadataConfirmedStillRequiresPeer(t *testing.T) {
-	t.Setenv("CONFIRM_RDMA_EN1_METADATA_ONE_SHOT", "one-shot-metadata")
+func TestRDMAMetadataRequiresPeer(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	err := run([]string{"rdma-metadata", "-device", "rdma_en1", "-expected-selected-gid-index", "1"}, &stdout, &stderr)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit code = %d err=%v, want 2", code, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remote is required") {
+		t.Fatalf("error = %v, want missing remote", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q, want empty", stdout.String(), stderr.String())
+	}
+}
+
+func TestRDMAAllocRequiresPeer(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"rdma-alloc", "-device", "rdma_en2"}, &stdout, &stderr)
+	if code := exitCode(err); code != 2 {
+		t.Fatalf("exit code = %d err=%v, want 2", code, err)
+	}
+	if err == nil || !strings.Contains(err.Error(), "remote is required") {
+		t.Fatalf("error = %v, want missing remote", err)
+	}
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Fatalf("stdout=%q stderr=%q, want empty", stdout.String(), stderr.String())
+	}
+}
+
+func TestRDMAInitRequiresPeer(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	err := run([]string{"rdma-init", "-device", "rdma_en2"}, &stdout, &stderr)
 	if code := exitCode(err); code != 2 {
 		t.Fatalf("exit code = %d err=%v, want 2", code, err)
 	}
@@ -473,6 +474,134 @@ func TestMetadataSummariesUseSideSpecificDevices(t *testing.T) {
 			if !strings.Contains(summary, want) {
 				t.Fatalf("%s summary missing %q in:\n%s", f.side, want, summary)
 			}
+		}
+	}
+}
+
+func TestInitEvaluateAcceptsAsymmetricDevices(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"local", "remote", "proof"} {
+		if err := os.Mkdir(filepath.Join(dir, name), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctl := filepath.Join(dir, "jacclctl")
+	proof := filepath.Join(dir, "jacclproof")
+	for _, path := range []string{ctl, proof} {
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0777); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeStatus := func(subdir, name string, status int) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, subdir, name+".status"), []byte(strconv.Itoa(status)+"\n"), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeOut := func(subdir, name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, subdir, name+".out"), []byte(text), 0666); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{
+		"build-jacclctl",
+		"build-jacclproof",
+		"remote-mkdir",
+		"copy-jacclctl",
+		"copy-jacclproof",
+		"remote-jacclctl-sha256",
+		"remote-jacclproof-sha256",
+	} {
+		writeStatus("proof", name, 0)
+	}
+	for _, name := range []string{"jacclctl-sha256", "jacclproof-sha256"} {
+		writeStatus("local", name, 0)
+	}
+	writeOut("local", "jacclctl-sha256", "abc  jacclctl\n")
+	writeOut("proof", "remote-jacclctl-sha256", "abc  jacclctl\n")
+	writeOut("local", "jacclproof-sha256", "def  jacclproof\n")
+	writeOut("proof", "remote-jacclproof-sha256", "def  jacclproof\n")
+
+	for _, side := range []struct {
+		name   string
+		device string
+	}{
+		{"local", "rdma_en2"},
+		{"remote", "rdma_en3"},
+	} {
+		for _, name := range []string{
+			"preflight-rdma",
+			"preflight-ibv",
+			"rdma-init-" + side.device,
+			"postflight-rdma",
+			"postflight-ibv",
+		} {
+			writeStatus(side.name, name, 0)
+		}
+		for _, name := range []string{"preflight-processes", "postflight-processes"} {
+			writeStatus(side.name, name, 1)
+			writeOut(side.name, name, "")
+		}
+		writeOut(side.name, "preflight-rdma", "enabled\n")
+		writeOut(side.name, "postflight-rdma", "enabled\n")
+		ibv := "hca_id:\t" + side.device + "\n\t\t\tstate:\t\t\tPORT_ACTIVE (4)\n"
+		writeOut(side.name, "preflight-ibv", ibv)
+		writeOut(side.name, "postflight-ibv", ibv)
+		writeOut(side.name, "rdma-init-"+side.device, strings.Join([]string{
+			"rdma resource command=rdma-init device=" + side.device + " cq_capacity=4 mr_bytes=4096 qpn=7 qpn_nonzero=true addr_nonzero=true lkey_nonzero=true rkey_nonzero=false init=true rtr=false work_requests=false",
+			"resource protection_domain=allocated",
+			"resource completion_queue=allocated",
+			"resource queue_pair=allocated",
+			"resource memory_region=allocated",
+			"",
+		}, "\n"))
+	}
+
+	r := allocRun{
+		opts: allocOptions{
+			Device:       "rdma_en2",
+			RemoteDevice: "rdma_en3",
+			Command:      "rdma-init",
+			CQCapacity:   4,
+			MRBytes:      4096,
+			InitQP:       true,
+			Artifact:     dir,
+		},
+		ctlBin:   ctl,
+		proofBin: proof,
+	}
+	if failures := r.evaluate(); len(failures) != 0 {
+		t.Fatalf("evaluate failures = %v", failures)
+	}
+}
+
+func TestRDMAAllocPacketDoesNotTransitionOrPost(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("alloc.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func runRDMAAllocPacket")
+	if start < 0 {
+		t.Fatal("runRDMAAllocPacket not found")
+	}
+	end := strings.Index(text[start:], "\nfunc runRDMAInitPacket")
+	if end < 0 {
+		t.Fatal("runRDMAInitPacket not found")
+	}
+	body := text[start : start+end]
+	for _, forbidden := range []string{
+		"InitQueuePair",
+		"ReadyToReceive",
+		"ReadyToSend",
+		"PostSend",
+		"PostRecv",
+		"PostWrite",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rdma allocation packet command must not call %s", forbidden)
 		}
 	}
 }

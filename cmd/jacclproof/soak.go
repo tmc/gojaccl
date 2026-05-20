@@ -330,8 +330,6 @@ func (r *soakRun) preflight() error {
 	}
 	metaArt := filepath.Join(dir, "rdma-en1-metadata")
 	args := []string{
-		"env",
-		"CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata",
 		filepath.Join(r.opts.Artifact, "bin", "jacclproof"),
 		"rdma-metadata",
 		"-device", r.opts.Device,

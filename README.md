@@ -157,20 +157,46 @@ jacclctl rdma-metadata -device rdma_en3 -max-gids 64
 This opens the device and queries port/GID metadata only. It does not allocate
 PDs, MRs, CQs, or QPs, and it does not post work requests.
 
-For the current post-reboot `rdma_en1` `errno 60` state, use the gated
-`jacclproof` packet command instead of ad hoc commands:
+For cross-host evidence, use the `jacclproof` packet command instead of ad hoc
+commands:
 
 ```sh
-CONFIRM_RDMA_EN1_METADATA_ONE_SHOT=one-shot-metadata \
-  go run ./cmd/jacclproof rdma-metadata \
-    -device rdma_en1 \
-    -remote <peer-ssh> \
-    -remote-tmp <peer-tmp-dir> \
-    -expected-selected-gid-index <expected-gid-index>
+go run ./cmd/jacclproof rdma-metadata \
+  -device rdma_en1 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir> \
+  -expected-selected-gid-index <expected-gid-index>
 ```
 
 The command preserves a timestamped artifact under `~/tmp` and still does not
 authorize RTR. Its final evaluator only classifies metadata collection.
+
+The next no-RTR preflight is allocation-only:
+
+```sh
+go run ./cmd/jacclproof rdma-alloc \
+  -device rdma_en2 \
+  -remote-device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
+```
+
+This packet allocates and tears down a protection domain, memory region,
+completion queue, and queue pair on each host. It does not transition the queue
+pair to RTR and does not post work requests.
+
+After allocation passes, an INIT-only packet can prove the first local QP state
+transition without crossing into RTR:
+
+```sh
+go run ./cmd/jacclproof rdma-init \
+  -device rdma_en2 \
+  -remote-device rdma_en3 \
+  -remote <peer-ssh> \
+  -remote-tmp <peer-tmp-dir>
+```
+
+RTR, RTS, and datapath work requests remain separate hardware gates.
 
 An operator can trigger the explicit maintenance operation through the daemon
 socket:

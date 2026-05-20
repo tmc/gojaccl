@@ -241,6 +241,51 @@ func TestRunRDMAMetadataCommandValidation(t *testing.T) {
 	}
 }
 
+func TestRunRDMAAllocCommandValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "missing device",
+			want: "device is required",
+		},
+		{
+			name: "unexpected argument",
+			args: []string{"-device", "rdma_en2", "extra"},
+			want: "unexpected rdma-alloc arguments",
+		},
+		{
+			name: "bad cq capacity",
+			args: []string{"-device", "rdma_en2", "-cq-capacity", "0"},
+			want: "cq-capacity 0 must be positive",
+		},
+		{
+			name: "bad mr bytes",
+			args: []string{"-device", "rdma_en2", "-mr-bytes", "0"},
+			want: "mr-bytes 0 must be positive",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			err := runRDMAAllocCommand(context.Background(), tt.args, &out)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("runRDMAAllocCommand = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunRDMAInitCommandValidation(t *testing.T) {
+	var out bytes.Buffer
+	err := runRDMAInitCommand(context.Background(), []string{"-device", "rdma_en2", "extra"}, &out)
+	if err == nil || !strings.Contains(err.Error(), "unexpected rdma-init arguments") {
+		t.Fatalf("runRDMAInitCommand = %v, want unexpected argument", err)
+	}
+}
+
 func TestFormatRDMAPortInfo(t *testing.T) {
 	info := rdma.PortInfo{
 		Device:           "rdma_en3",
@@ -275,6 +320,23 @@ func TestFormatRDMAPortInfo(t *testing.T) {
 	}
 }
 
+func TestFormatRDMAAllocation(t *testing.T) {
+	var out bytes.Buffer
+	formatRDMAResource(&out, "rdma-init", "rdma_en2", 4, 4096, true, nil, nil)
+	got := out.String()
+	for _, want := range []string{
+		"rdma resource command=rdma-init device=rdma_en2 cq_capacity=4 mr_bytes=4096 qpn=0 qpn_nonzero=false addr_nonzero=false lkey_nonzero=false rkey_nonzero=false init=true rtr=false work_requests=false",
+		"resource protection_domain=allocated",
+		"resource completion_queue=allocated",
+		"resource queue_pair=allocated",
+		"resource memory_region=allocated",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("allocation output missing %q in:\n%s", want, got)
+		}
+	}
+}
+
 func TestRDMAMetadataCommandDoesNotAllocateResources(t *testing.T) {
 	src, err := os.ReadFile("main.go")
 	if err != nil {
@@ -304,6 +366,66 @@ func TestRDMAMetadataCommandDoesNotAllocateResources(t *testing.T) {
 	} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("rdma metadata command must not call %s", forbidden)
+		}
+	}
+}
+
+func TestRDMAAllocCommandDoesNotTransitionOrPost(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func runRDMAAllocCommand")
+	if start < 0 {
+		t.Fatal("runRDMAAllocCommand not found")
+	}
+	end := strings.Index(text[start:], "\nfunc runRDMAInitCommand")
+	if end < 0 {
+		t.Fatal("runRDMAInitCommand not found")
+	}
+	body := text[start : start+end]
+	if strings.Contains(body, "InitQueuePair") {
+		t.Fatal("rdma allocation command must not call InitQueuePair")
+	}
+}
+
+func TestRDMAResourceCommandDoesNotRTROrPost(t *testing.T) {
+	src, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	start := strings.Index(text, "func runRDMAResourceCommand")
+	if start < 0 {
+		t.Fatal("runRDMAResourceCommand not found")
+	}
+	end := strings.Index(text[start:], "\nfunc formatRDMAResource")
+	if end < 0 {
+		t.Fatal("formatRDMAResource not found")
+	}
+	body := text[start : start+end]
+	for _, want := range []string{
+		"NewProtectionDomain",
+		"NewCompletionQueue",
+		"NewQueuePair",
+		"NewMemoryRegion",
+		"InitQueuePair",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rdma resource command missing %s", want)
+		}
+	}
+	for _, forbidden := range []string{
+		"RegisterMemory",
+		"ReadyToReceive",
+		"ReadyToSend",
+		"PostSend",
+		"PostRecv",
+		"PostWrite",
+	} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("rdma allocation command must not call %s", forbidden)
 		}
 	}
 }
